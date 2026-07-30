@@ -170,6 +170,50 @@ export const ETF_CATALOG: CatalogGroup[] = [
     ],
   },
   {
+    id: "nasdaq-100",
+    name: "Nasdaq-100",
+    provider: "Nasdaq",
+    region: "United States · large cap growth",
+    description:
+      "100 of the largest non-financial companies listed on the Nasdaq.",
+    variants: [
+      {
+        id: "iqq-us",
+        ticker: "IQQ",
+        name: "iShares Nasdaq 100 ETF",
+        benchmarkId: "nasdaq-100",
+        isin: "US46438T3095",
+        wrapper: "US_1940_ACT",
+        domicile: "United States",
+        exchange: "NASDAQ",
+        tradingCurrency: "USD",
+        distributionPolicy: "Distributing",
+        ter: 0.12,
+        productUrl:
+          "https://www.ishares.com/us/products/351653/ishares-nasdaq-100-etf",
+        holdingsUrl:
+          "https://www.ishares.com/us/products/351653/ishares-nasdaq-100-etf/latest-holdings.csv",
+      },
+      {
+        id: "cndx-ucits",
+        ticker: "CNDX",
+        name: "iShares Nasdaq 100 UCITS ETF",
+        benchmarkId: "nasdaq-100",
+        isin: "IE00B53SZB19",
+        wrapper: "UCITS",
+        domicile: "Ireland",
+        exchange: "London Stock Exchange",
+        tradingCurrency: "USD",
+        distributionPolicy: "Accumulating",
+        ter: 0.3,
+        productUrl:
+          "https://www.ishares.com/uk/individual/en/products/253741/ishares-nasdaq-100-ucits-etf",
+        holdingsUrl:
+          "https://www.ishares.com/ch/individual/en/products/253741/ishares-nasdaq-100-ucits-etf/1495092304805.ajax?fileType=csv&fileName=CNDX_holdings&dataType=fund",
+      },
+    ],
+  },
+  {
     id: "russell-2000",
     name: "Russell 2000",
     provider: "FTSE Russell",

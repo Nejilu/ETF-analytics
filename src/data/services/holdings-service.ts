@@ -19,8 +19,8 @@ export class HoldingsUnavailableError extends Error {
   constructor(ticker: string, cause?: unknown) {
     super(
       cause instanceof Error
-        ? `Les holdings de ${ticker} sont indisponibles : ${cause.message}`
-        : `Les holdings de ${ticker} sont indisponibles.`,
+        ? `Holdings for ${ticker} are unavailable: ${cause.message}`
+        : `Holdings for ${ticker} are unavailable.`,
     );
     this.name = "HoldingsUnavailableError";
     this.ticker = ticker;
@@ -32,7 +32,7 @@ export async function getHoldingsSnapshot(
 ): Promise<HoldingsSnapshot> {
   const etf = getEtfByTicker(ticker);
   if (!etf) {
-    throw new Error(`ETF non pris en charge : ${ticker}`);
+    throw new Error(`Unsupported ETF: ${ticker}`);
   }
 
   try {
@@ -49,7 +49,7 @@ export async function getHoldingsSnapshot(
     });
 
     if (!response.ok) {
-      throw new Error(`Source iShares indisponible (${response.status}).`);
+      throw new Error(`iShares source unavailable (${response.status}).`);
     }
 
     const parsed = parseIsharesHoldingsCsv(await response.text());

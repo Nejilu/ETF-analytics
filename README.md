@@ -1,47 +1,60 @@
 # IndexLens
 
-Premier jet d’une webapp Next.js pour comparer les expositions réelles des ETF
-iShares : holdings, chevauchement, sleeves actives et écarts sectoriels.
+IndexLens is a Next.js application for comparing the underlying exposures of
+iShares ETFs: holdings, weighted overlap, active sleeves and sector allocation.
 
-## Démarrage
+## Development
 
 ```bash
 npm install
 npm run dev
 ```
 
-Puis ouvrir `http://localhost:3000`.
+Open `http://localhost:3000`.
 
-## Ce qui est déjà prévu
+## Local production deployment
 
-- sélection par indice sous-jacent, puis par enveloppe UCITS ou américaine ;
-- ingestion serveur des CSV officiels iShares ;
-- cache Next.js de 24 heures, sans données synthétiques ni chiffres de repli ;
-- processeur pur et réutilisable pour l’overlap et les sleeves actives ;
-- endpoints versionnés : `/api/v1/catalog`, `/api/v1/holdings/:ticker` et
-  `/api/v1/compare?left=IVV&right=SWDA` ;
-- schéma Drizzle versionné pour les ETF, les titres, les snapshots de holdings
-  et de futures métriques génériques.
+```bash
+npm ci
+npm run build
+npm run start
+```
+
+The application is served at `http://localhost:3000`. Use `/api/health` to
+check that the instance is operational. The Next.js build uses `standalone`
+output and can therefore be packaged in Docker later without changing the
+application.
+
+## Current scope
+
+- Select an underlying index, then a US or UCITS ETF wrapper.
+- Ingest official iShares CSV files on the server.
+- Cache source files for 24 hours without synthetic or fallback figures.
+- Use a pure, reusable processor for weighted overlap and active sleeves.
+- Expose versioned endpoints: `/api/v1/catalog`,
+  `/api/v1/holdings/:ticker` and
+  `/api/v1/compare?left=IVV&right=SWDA`.
+- Provide a versioned Drizzle schema for ETFs, securities, holdings snapshots
+  and future generic metrics.
 
 ## Architecture
 
 ```text
 src/
-  app/                  routes et API Next.js
-  components/           panneaux d’interface réutilisables
+  app/                  Next.js routes and API handlers
+  components/           reusable interface panels
   data/
-    providers/          adaptateurs de sources externes
-    services/           orchestration cache + erreurs de source explicites
+    providers/          external source adapters
+    services/           cache orchestration and explicit source errors
   domain/
-    processors/         calculs purs indépendants de l’interface
-  db/                   modèle de persistance futur
+    processors/         pure calculations independent of the interface
+  db/                   future persistence model
 ```
 
-Le premier jet ne persiste pas encore les téléchargements dans SQLite : le
-cache de 24 h est assuré par Next.js. Si iShares ne répond pas, l’API renvoie
-une erreur 503 et l’interface affiche les données comme indisponibles. Aucun jeu
-de démonstration n’est utilisé. Le schéma de base est prêt pour un adaptateur de
-repository durable, sans modifier les processeurs ni les panneaux.
+The first release does not yet persist downloads to SQLite. Next.js provides
+the 24-hour source cache. If iShares does not respond, the API returns HTTP 503
+and the interface marks the affected data as unavailable. No demonstration
+dataset is used. The database schema is ready for a durable repository adapter
+without requiring changes to the processors or panels.
 
-Les données restent indicatives et ne constituent pas un conseil en
-investissement.
+Data is indicative and does not constitute investment advice.

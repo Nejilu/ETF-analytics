@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     return Response.json(
       {
         error:
-          "Sélection invalide. Utilisez deux tickers présents dans le catalogue.",
+          "Invalid selection. Use two tickers available in the catalog.",
       },
       { status: 400 },
     );
@@ -37,8 +37,8 @@ export async function GET(request: Request) {
       {
         error:
           unavailable.length > 0
-            ? `Données indisponibles pour ${unavailable.join(" et ")}. Aucun chiffre de substitution n’est affiché.`
-            : "Les données iShares sont temporairement indisponibles.",
+            ? `Data unavailable for ${unavailable.join(" and ")}. No substitute figures are shown.`
+            : "iShares data is temporarily unavailable.",
         unavailable,
       },
       {
@@ -50,7 +50,7 @@ export async function GET(request: Request) {
 
   const [left, right] = snapshots.map((result) => {
     if (result.status !== "fulfilled") {
-      throw new Error("État de chargement incohérent.");
+      throw new Error("Inconsistent loading state.");
     }
     return result.value;
   });

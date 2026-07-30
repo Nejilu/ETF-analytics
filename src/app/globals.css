@@ -1,18 +1,18 @@
 :root {
-  --ink: #20232b;
-  --muted: #777d89;
-  --faint: #a4a9b2;
-  --line: #e7e9ee;
+  --ink: #202630;
+  --muted: #69717e;
+  --faint: #98a0ab;
+  --line: #dfe3e8;
   --surface: #ffffff;
-  --canvas: #f4f5f7;
-  --sidebar: #161920;
-  --purple: #7567e8;
-  --purple-soft: #efedff;
-  --coral: #eb785f;
-  --coral-soft: #fff0ec;
-  --mint: #24c6a1;
-  --mint-soft: #e7faf5;
-  --shadow: 0 12px 34px rgba(29, 34, 44, 0.055);
+  --canvas: #f5f6f7;
+  --sidebar: #15191f;
+  --purple: #536b8a;
+  --purple-soft: #edf1f5;
+  --coral: #9a6358;
+  --coral-soft: #f6efed;
+  --mint: #26775f;
+  --mint-soft: #eaf4f0;
+  --shadow: 0 3px 12px rgba(26, 32, 42, 0.035);
 }
 
 * {
@@ -47,7 +47,7 @@ a {
 button:focus-visible,
 a:focus-visible,
 select:focus-visible {
-  outline: 3px solid rgba(117, 103, 232, 0.3);
+  outline: 3px solid rgba(83, 107, 138, 0.25);
   outline-offset: 2px;
 }
 
@@ -62,10 +62,10 @@ select:focus-visible {
   flex-direction: column;
   height: 100vh;
   left: 0;
-  padding: 24px 16px 18px;
+  padding: 20px 14px 16px;
   position: fixed;
   top: 0;
-  width: 228px;
+  width: 218px;
   z-index: 20;
 }
 
@@ -76,13 +76,13 @@ select:focus-visible {
   font-weight: 720;
   gap: 11px;
   letter-spacing: -0.4px;
-  padding: 0 8px 30px;
+  padding: 0 8px 26px;
 }
 
 .brand-mark {
   align-items: flex-end;
   background: #fff;
-  border-radius: 9px;
+  border-radius: 6px;
   display: flex;
   gap: 2px;
   height: 30px;
@@ -120,12 +120,12 @@ select:focus-visible {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 10px;
+  border-radius: 6px;
   color: #9ca1ad;
   cursor: pointer;
   display: flex;
   gap: 11px;
-  min-height: 42px;
+  min-height: 38px;
   padding: 0 12px;
   text-align: left;
   text-decoration: none;
@@ -178,11 +178,9 @@ select:focus-visible {
 }
 
 .sidebar-card {
-  background:
-    radial-gradient(circle at 90% 0%, rgba(36, 198, 161, 0.16), transparent 50%),
-    #20242c;
+  background: #1e232b;
   border: 1px solid #2b303a;
-  border-radius: 13px;
+  border-radius: 7px;
   margin-top: auto;
   padding: 14px;
   position: relative;
@@ -252,19 +250,19 @@ select:focus-visible {
 }
 
 .main-content {
-  margin-left: 228px;
+  margin-left: 218px;
   min-height: 100vh;
 }
 
 .topbar {
   align-items: center;
-  background: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.94);
   border-bottom: 1px solid var(--line);
   backdrop-filter: blur(12px);
   display: flex;
-  height: 64px;
+  height: 56px;
   justify-content: space-between;
-  padding: 0 32px;
+  padding: 0 28px;
   position: sticky;
   top: 0;
   z-index: 10;
@@ -290,7 +288,7 @@ select:focus-visible {
   align-items: center;
   background: var(--mint-soft);
   border: 1px solid #c7eee4;
-  border-radius: 20px;
+  border-radius: 4px;
   color: #16866e;
   display: flex;
   font-size: 10px;
@@ -340,14 +338,7 @@ select:focus-visible {
 .workspace {
   margin: 0 auto;
   max-width: 1440px;
-  padding: 40px 36px 28px;
-}
-
-.hero {
-  align-items: flex-end;
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 26px;
+  padding: 24px 28px 24px;
 }
 
 .eyebrow {
@@ -360,46 +351,10 @@ select:focus-visible {
   text-transform: uppercase;
 }
 
-.hero h1 {
-  font-size: clamp(26px, 3vw, 38px);
-  font-weight: 680;
-  letter-spacing: -1.5px;
-  line-height: 1.08;
-  margin: 0;
-  max-width: 680px;
-}
-
-.hero > div > p {
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.55;
-  margin: 12px 0 0;
-  max-width: 670px;
-}
-
-.hero-note {
-  border-left: 1px solid #d9dce2;
-  display: grid;
-  flex: 0 0 148px;
-  margin-bottom: 3px;
-  padding-left: 18px;
-}
-
-.hero-note span,
-.hero-note small {
-  color: var(--muted);
-  font-size: 9px;
-}
-
-.hero-note strong {
-  font-size: 12px;
-  margin: 4px 0;
-}
-
 .comparison-builder {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 8px;
   box-shadow: var(--shadow);
   display: grid;
   grid-template-columns: minmax(0, 1fr) 46px minmax(0, 1fr);
@@ -409,19 +364,15 @@ select:focus-visible {
 
 .fund-selector {
   min-width: 0;
-  padding: 22px 24px 20px;
+  padding: 18px 20px 16px;
 }
 
 .fund-selector--left {
-  background:
-    linear-gradient(135deg, rgba(117, 103, 232, 0.035), transparent 52%),
-    #fff;
+  background: #fff;
 }
 
 .fund-selector--right {
-  background:
-    linear-gradient(225deg, rgba(235, 120, 95, 0.04), transparent 52%),
-    #fff;
+  background: #fff;
 }
 
 .fund-selector__eyebrow {
@@ -472,7 +423,7 @@ select:focus-visible {
     linear-gradient(135deg, #7d838e 50%, transparent 50%) right 10px top 52% / 5px 5px no-repeat,
     #f8f9fa;
   border: 1px solid #e6e8ec;
-  border-radius: 9px;
+  border-radius: 5px;
   color: #30343d;
   cursor: pointer;
   font-size: 11px;
@@ -499,7 +450,7 @@ select:focus-visible {
 .ticker-tile {
   align-items: center;
   background: var(--purple-soft);
-  border-radius: 9px;
+  border-radius: 5px;
   color: var(--purple);
   display: flex;
   flex: 0 0 42px;
@@ -562,7 +513,7 @@ select:focus-visible {
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 50%;
-  box-shadow: 0 4px 12px rgba(27, 31, 40, 0.07);
+  box-shadow: none;
   content: "";
   height: 30px;
   left: 8px;
@@ -587,7 +538,7 @@ select:focus-visible {
   display: flex;
   grid-column: 1 / -1;
   justify-content: flex-end;
-  min-height: 60px;
+  min-height: 54px;
   padding: 10px 18px;
 }
 
@@ -602,7 +553,7 @@ select:focus-visible {
   align-items: center;
   background: #232731;
   border: 0;
-  border-radius: 9px;
+  border-radius: 5px;
   color: #fff;
   cursor: pointer;
   display: flex;
@@ -650,7 +601,7 @@ select:focus-visible {
 .alert {
   background: #fff9e6;
   border: 1px solid #f0e2ad;
-  border-radius: 10px;
+  border-radius: 5px;
   color: #776329;
   font-size: 10px;
   line-height: 1.5;
@@ -674,8 +625,8 @@ select:focus-visible {
 .metric-card {
   background: #fff;
   border: 1px solid var(--line);
-  border-radius: 13px;
-  box-shadow: 0 8px 24px rgba(29, 34, 44, 0.035);
+  border-radius: 7px;
+  box-shadow: none;
   min-width: 0;
   padding: 16px 17px;
   position: relative;
@@ -734,7 +685,7 @@ select:focus-visible {
 .panel {
   background: #fff;
   border: 1px solid var(--line);
-  border-radius: 15px;
+  border-radius: 8px;
   box-shadow: var(--shadow);
   min-width: 0;
 }
@@ -759,7 +710,7 @@ select:focus-visible {
 .info-chip {
   background: #f5f6f8;
   border: 1px solid #eceef1;
-  border-radius: 20px;
+  border-radius: 4px;
   color: #8c929d;
   font-size: 8px;
   padding: 5px 8px;
@@ -961,7 +912,7 @@ select:focus-visible {
 .availability-card {
   background: #f8f9fa;
   border: 1px solid #eceef1;
-  border-radius: 11px;
+  border-radius: 6px;
   display: grid;
   gap: 4px;
   min-width: 0;
@@ -995,7 +946,7 @@ select:focus-visible {
 
 .segmented-control {
   background: #f4f5f7;
-  border-radius: 8px;
+  border-radius: 5px;
   display: flex;
   padding: 3px;
 }
@@ -1003,7 +954,7 @@ select:focus-visible {
 .segmented-control button {
   background: transparent;
   border: 0;
-  border-radius: 6px;
+  border-radius: 3px;
   color: #8a909a;
   cursor: pointer;
   font-size: 9px;
@@ -1012,7 +963,7 @@ select:focus-visible {
 
 .segmented-control button.is-active {
   background: #fff;
-  box-shadow: 0 2px 7px rgba(31, 36, 45, 0.08);
+  box-shadow: 0 1px 3px rgba(31, 36, 45, 0.1);
   color: #2f333c;
   font-weight: 650;
 }
@@ -1077,7 +1028,7 @@ tbody tr:hover {
 .security-avatar {
   align-items: center;
   background: #f1f2f5;
-  border-radius: 7px;
+  border-radius: 4px;
   color: #6f7580;
   display: flex;
   flex: 0 0 28px;
@@ -1109,7 +1060,7 @@ tbody tr:hover {
 
 .overlap-pill {
   background: var(--mint-soft);
-  border-radius: 20px;
+  border-radius: 4px;
   color: #1b8d75;
   display: inline-block;
   font-size: 9px;
@@ -1211,15 +1162,6 @@ tbody tr:hover {
     padding: 28px 18px;
   }
 
-  .hero {
-    align-items: flex-start;
-    gap: 20px;
-  }
-
-  .hero-note {
-    display: none;
-  }
-
   .comparison-builder {
     grid-template-columns: 1fr;
   }
@@ -1265,10 +1207,6 @@ tbody tr:hover {
 }
 
 @media (max-width: 580px) {
-  .hero h1 {
-    font-size: 29px;
-  }
-
   .field-grid {
     grid-template-columns: 1fr;
   }

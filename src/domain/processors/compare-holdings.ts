@@ -74,8 +74,8 @@ export function compareHoldings(
       return {
         securityId,
         ticker: left?.ticker ?? right?.ticker ?? "—",
-        name: left?.name ?? right?.name ?? "Titre inconnu",
-        sector: left?.sector ?? right?.sector ?? "Non classé",
+        name: left?.name ?? right?.name ?? "Unknown security",
+        sector: left?.sector ?? right?.sector ?? "Unclassified",
         leftWeight: round(leftWeight),
         overlapWeight: round(overlapWeight),
         rightWeight: round(rightWeight),

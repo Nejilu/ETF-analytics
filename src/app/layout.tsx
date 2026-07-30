@@ -11,9 +11,9 @@ export async function generateMetadata(): Promise<Metadata> {
   const metadataBase = new URL(
     host ? `${protocol}://${host}` : "http://localhost:3000",
   );
-  const title = "IndexLens — Comparateur d’ETF";
+  const title = "IndexLens — ETF Holdings Comparison";
   const description =
-    "Comparez les holdings, sleeves actives et chevauchements des principaux ETF iShares UCITS et américains.";
+    "Compare holdings, active sleeves and overlap across leading iShares UCITS and US ETFs.";
 
   return {
     metadataBase,
@@ -29,7 +29,7 @@ export async function generateMetadata(): Promise<Metadata> {
           url: "/og.png",
           width: 1732,
           height: 908,
-          alt: "IndexLens — comparaison des holdings et de l’overlap de deux ETF",
+          alt: "IndexLens ETF holdings and overlap comparison",
         },
       ],
     },
@@ -44,7 +44,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="fr">
+    <html lang="en">
       <body>{children}</body>
     </html>
   );

@@ -28,14 +28,14 @@ interface ComparisonWorkbenchProps {
 type SelectionSide = "left" | "right";
 
 const COLORS = {
-  left: "#7567e8",
-  overlap: "#24c6a1",
-  right: "#eb785f",
-  track: "#e7e9ee",
+  left: "#536b8a",
+  overlap: "#26775f",
+  right: "#9a6358",
+  track: "#dfe3e8",
 };
 
 function formatPercent(value: number, digits = 1) {
-  return `${value.toFixed(digits).replace(".", ",")} %`;
+  return `${value.toFixed(digits)}%`;
 }
 
 function formatDate(value: string) {
@@ -76,9 +76,9 @@ function FundSelector({
       </div>
       <div className="field-grid">
         <label className="field">
-          <span>Indice sous-jacent</span>
+          <span>Underlying index</span>
           <select
-            aria-label={`Indice de l’ETF ${side === "left" ? "A" : "B"}`}
+            aria-label={`Underlying index for ETF ${side === "left" ? "A" : "B"}`}
             value={benchmarkId}
             onChange={(event) => onBenchmarkChange(side, event.target.value)}
           >
@@ -90,9 +90,9 @@ function FundSelector({
           </select>
         </label>
         <label className="field">
-          <span>Part / enveloppe</span>
+          <span>Share class / wrapper</span>
           <select
-            aria-label={`Part de l’ETF ${side === "left" ? "A" : "B"}`}
+            aria-label={`Share class for ETF ${side === "left" ? "A" : "B"}`}
             value={ticker}
             onChange={(event) => onTickerChange(side, event.target.value)}
           >
@@ -109,7 +109,7 @@ function FundSelector({
         <div>
           <strong>{etf.name}</strong>
           <p>
-            {etf.domicile} · {etf.distributionPolicy === "Accumulating" ? "Capitalisant" : "Distribuant"} · TER{" "}
+            {etf.domicile} · {etf.distributionPolicy} · TER{" "}
             {formatPercent(etf.ter, 2)}
           </p>
         </div>
@@ -140,8 +140,8 @@ function MetricCard({
 
 function OverlapDonut({ comparison }: { comparison: ComparisonResult }) {
   const data = [
-    { name: "Chevauchement", value: comparison.overlapWeight },
-    { name: "Différentiel", value: 100 - comparison.overlapWeight },
+    { name: "Overlap", value: comparison.overlapWeight },
+    { name: "Difference", value: 100 - comparison.overlapWeight },
   ];
 
   return (
@@ -172,7 +172,7 @@ function OverlapDonut({ comparison }: { comparison: ComparisonResult }) {
       </ResponsiveContainer>
       <div className="donut-center" aria-hidden="true">
         <strong>{formatPercent(comparison.overlapWeight, 0)}</strong>
-        <span>en commun</span>
+        <span>overlap</span>
       </div>
     </div>
   );
@@ -184,7 +184,7 @@ function SleeveBars({ comparison }: { comparison: ComparisonResult }) {
       <div className="sleeve-row">
         <div className="sleeve-row__header">
           <strong>{comparison.left.etf.ticker}</strong>
-          <span>{formatPercent(comparison.leftActiveWeight)} actif</span>
+          <span>{formatPercent(comparison.leftActiveWeight)} active</span>
         </div>
         <div className="sleeve-track">
           <span
@@ -200,7 +200,7 @@ function SleeveBars({ comparison }: { comparison: ComparisonResult }) {
       <div className="sleeve-row">
         <div className="sleeve-row__header">
           <strong>{comparison.right.etf.ticker}</strong>
-          <span>{formatPercent(comparison.rightActiveWeight)} actif</span>
+          <span>{formatPercent(comparison.rightActiveWeight)} active</span>
         </div>
         <div className="sleeve-track">
           <span
@@ -214,9 +214,9 @@ function SleeveBars({ comparison }: { comparison: ComparisonResult }) {
         </div>
       </div>
       <div className="legend">
-        <span><i className="legend-dot legend-dot--left" />Actif {comparison.left.etf.ticker}</span>
+        <span><i className="legend-dot legend-dot--left" />Active {comparison.left.etf.ticker}</span>
         <span><i className="legend-dot legend-dot--overlap" />Overlap</span>
-        <span><i className="legend-dot legend-dot--right" />Actif {comparison.right.etf.ticker}</span>
+        <span><i className="legend-dot legend-dot--right" />Active {comparison.right.etf.ticker}</span>
       </div>
     </div>
   );
@@ -224,7 +224,7 @@ function SleeveBars({ comparison }: { comparison: ComparisonResult }) {
 
 function SectorChart({ comparison }: { comparison: ComparisonResult }) {
   const data = comparison.sectorComparison
-    .filter((sector) => sector.sector !== "Autres")
+    .filter((sector) => sector.sector !== "Other")
     .slice(0, 7)
     .map((sector) => ({
       ...sector,
@@ -307,23 +307,23 @@ function PositionTable({ comparison }: { comparison: ComparisonResult }) {
     <section className="panel positions-panel">
       <div className="panel-heading panel-heading--table">
         <div>
-          <span className="eyebrow">Lecture par titre</span>
-          <h2>{filter === "active" ? "Principaux écarts actifs" : "Principales positions communes"}</h2>
+          <span className="eyebrow">Security-level analysis</span>
+          <h2>{filter === "active" ? "Largest active weights" : "Largest shared positions"}</h2>
         </div>
-        <div className="segmented-control" aria-label="Filtrer les positions">
+        <div className="segmented-control" aria-label="Filter positions">
           <button
             type="button"
             className={filter === "active" ? "is-active" : ""}
             onClick={() => setFilter("active")}
           >
-            Actif
+            Active
           </button>
           <button
             type="button"
             className={filter === "overlap" ? "is-active" : ""}
             onClick={() => setFilter("overlap")}
           >
-            Commun
+            Shared
           </button>
         </div>
       </div>
@@ -331,11 +331,11 @@ function PositionTable({ comparison }: { comparison: ComparisonResult }) {
         <table>
           <thead>
             <tr>
-              <th>Titre</th>
+              <th>Security</th>
               <th>{comparison.left.etf.ticker}</th>
               <th>Overlap</th>
               <th>{comparison.right.etf.ticker}</th>
-              <th>Lecture</th>
+              <th>Signal</th>
             </tr>
           </thead>
           <tbody>
@@ -365,10 +365,10 @@ function PositionRow({
 }) {
   const dominant =
     position.leftActiveWeight > position.rightActiveWeight
-      ? `Surpondéré ${leftTicker}`
+      ? `Overweight ${leftTicker}`
       : position.rightActiveWeight > position.leftActiveWeight
-        ? `Surpondéré ${rightTicker}`
-        : "Poids aligné";
+        ? `Overweight ${rightTicker}`
+        : "Aligned weight";
 
   return (
     <tr>
@@ -412,25 +412,25 @@ function DataUnavailableState({
       <div className="no-data-icon" aria-hidden="true">{hasError ? "!" : "↻"}</div>
       <div className="no-data-copy">
         <span className="eyebrow">
-          {hasError ? "Source indisponible" : "Données à la demande"}
+          {hasError ? "Source unavailable" : "On-demand data"}
         </span>
         <h2>
           {hasError
-            ? "Aucun chiffre de substitution n’est affiché."
-            : "Chargez les holdings officiels pour commencer."}
+            ? "No substitute figures are shown."
+            : "Load official holdings to begin."}
         </h2>
         <p>
           {hasError
-            ? "La comparaison reste vide tant que les fichiers iShares requis ne sont pas accessibles."
-            : "IndexLens interrogera directement iShares et conservera la réponse pendant 24 heures."}
+            ? "The comparison remains empty until the required iShares files are available."
+            : "IndexLens fetches data directly from iShares and caches each response for 24 hours."}
         </p>
       </div>
       <div className="availability-grid">
         {[leftTicker, rightTicker].map((ticker) => (
           <div className="availability-card" key={ticker}>
             <strong>{ticker}</strong>
-            <span>Nombre de positions</span>
-            <b>{isUnavailable(ticker) ? "Indisponible" : "Non chargé"}</b>
+            <span>Holdings count</span>
+            <b>{isUnavailable(ticker) ? "Unavailable" : "Not loaded"}</b>
           </div>
         ))}
       </div>
@@ -484,7 +484,7 @@ export function ComparisonWorkbench({
         setUnavailable(payload.unavailable ?? []);
         setError(
           payload.error ??
-            "Les données iShares sont indisponibles. Aucun chiffre n’est affiché.",
+            "iShares data is unavailable. No figures are shown.",
         );
         return;
       }
@@ -494,7 +494,7 @@ export function ComparisonWorkbench({
       setError(
         requestError instanceof Error
           ? requestError.message
-          : "Une erreur inattendue est survenue.",
+          : "An unexpected error occurred.",
       );
     } finally {
       setLoading(false);
@@ -512,36 +512,36 @@ export function ComparisonWorkbench({
           </span>
           <span>IndexLens</span>
         </div>
-        <nav className="main-nav" aria-label="Navigation principale">
-          <a className="nav-item nav-item--active" href="#comparateur">
+        <nav className="main-nav" aria-label="Primary navigation">
+          <a className="nav-item nav-item--active" href="#comparison">
             <span className="nav-icon">↔</span>
-            Comparateur
+            Compare
           </a>
           <a className="nav-item" href="#positions">
             <span className="nav-icon">◎</span>
             Holdings
           </a>
-          <span className="nav-caption">Prochains panneaux</span>
+          <span className="nav-caption">Planned modules</span>
           <button className="nav-item nav-item--disabled" type="button">
             <span className="nav-icon">⌁</span>
-            Expositions
-            <small>Bientôt</small>
+            Exposures
+            <small>Soon</small>
           </button>
           <button className="nav-item nav-item--disabled" type="button">
             <span className="nav-icon">⌗</span>
-            Métriques
-            <small>Bientôt</small>
+            Metrics
+            <small>Soon</small>
           </button>
         </nav>
         <div className="sidebar-card">
           <span className="live-pulse" />
-          <strong>Sources iShares</strong>
-          <p>Holdings mis en cache pendant 24 heures.</p>
+          <strong>iShares sources</strong>
+          <p>Official holdings cached for 24 hours.</p>
         </div>
         <div className="sidebar-footer">
           <span>JL</span>
           <div>
-            <strong>Espace recherche</strong>
+            <strong>Research workspace</strong>
             <small>Version 0.1</small>
           </div>
         </div>
@@ -550,43 +550,21 @@ export function ComparisonWorkbench({
       <main className="main-content">
         <header className="topbar">
           <div className="breadcrumb">
-            Analyse <span>/</span> Comparateur ETF
+            Analysis <span>/</span> ETF comparison
           </div>
           <div className="topbar-actions">
             <span className={`source-badge ${error ? "source-badge--error" : comparison ? "" : "source-badge--idle"}`}>
               <i />
-              {error ? "Indisponible" : comparison ? "Données en ligne" : "Non chargé"}
+              {error ? "Unavailable" : comparison ? "Live data" : "Not loaded"}
             </span>
-            <button className="icon-button" type="button" aria-label="Aide">
+            <button className="icon-button" type="button" aria-label="Help">
               ?
             </button>
           </div>
         </header>
 
         <div className="workspace">
-          <section className="hero" id="comparateur">
-            <div>
-              <span className="eyebrow">Analyse look-through</span>
-              <h1>Comparez ce que vos ETF détiennent vraiment.</h1>
-              <p>
-                Sélectionnez deux indices et leurs parts iShares pour isoler
-                le portefeuille commun et les paris réellement actifs.
-              </p>
-            </div>
-            <div className="hero-note">
-              <span>Dernier calcul</span>
-              <strong>
-                {comparison ? formatDate(comparison.calculatedAt) : "—"}
-              </strong>
-              <small>
-                {comparison
-                  ? `Cache source · ${comparison.cacheTtlHours} h`
-                  : "Données non chargées"}
-              </small>
-            </div>
-          </section>
-
-          <section className="comparison-builder">
+          <section className="comparison-builder" id="comparison">
             <FundSelector
               side="left"
               benchmarkId={leftBenchmark}
@@ -611,13 +589,13 @@ export function ComparisonWorkbench({
                 onClick={compare}
                 disabled={loading}
               >
-                {loading ? <span className="spinner" /> : <span>Actualiser la comparaison</span>}
+                {loading ? <span className="spinner" /> : <span>Run comparison</span>}
                 {!loading && <b aria-hidden="true">→</b>}
               </button>
               <small>
                 {comparison
-                  ? `${comparison.left.etf.ticker} au ${formatDate(comparison.left.asOf)} · ${comparison.right.etf.ticker} au ${formatDate(comparison.right.asOf)}`
-                  : "Chargement direct depuis les fichiers officiels iShares"}
+                  ? `${comparison.left.etf.ticker} as of ${formatDate(comparison.left.asOf)} · ${comparison.right.etf.ticker} as of ${formatDate(comparison.right.asOf)} · ${comparison.cacheTtlHours}h cache`
+                  : "Direct load from official iShares files · 24h cache"}
               </small>
             </div>
           </section>
@@ -625,29 +603,29 @@ export function ComparisonWorkbench({
           {error && <div className="alert alert--error">{error}</div>}
           {comparison ? (
             <>
-              <section className="metric-grid" aria-label="Indicateurs de comparaison">
+              <section className="metric-grid" aria-label="Comparison metrics">
                 <MetricCard
-                  label="Chevauchement pondéré"
+                  label="Weighted overlap"
                   value={formatPercent(comparison.overlapWeight)}
-                  detail={`${comparison.sharedPositionsCount} lignes partagées`}
+                  detail={`${comparison.sharedPositionsCount} shared securities`}
                   tone="positive"
                 />
                 <MetricCard
-                  label={`Sleeve active ${comparison.left.etf.ticker}`}
+                  label={`${comparison.left.etf.ticker} active sleeve`}
                   value={formatPercent(comparison.leftActiveWeight)}
                   detail={`Top 10 = ${formatPercent(comparison.left.top10Concentration)}`}
                   tone="left"
                 />
                 <MetricCard
-                  label={`Sleeve active ${comparison.right.etf.ticker}`}
+                  label={`${comparison.right.etf.ticker} active sleeve`}
                   value={formatPercent(comparison.rightActiveWeight)}
                   detail={`Top 10 = ${formatPercent(comparison.right.top10Concentration)}`}
                   tone="right"
                 />
                 <MetricCard
-                  label="Univers analysé"
+                  label="Holdings universe"
                   value={`${comparison.left.holdingsCount} / ${comparison.right.holdingsCount}`}
-                  detail="positions dans chaque ETF"
+                  detail="positions in each ETF"
                 />
               </section>
 
@@ -655,25 +633,25 @@ export function ComparisonWorkbench({
                 <article className="panel overlap-panel">
                   <div className="panel-heading">
                     <div>
-                      <span className="eyebrow">Décomposition des sleeves</span>
-                      <h2>Commun vs actif</h2>
+                      <span className="eyebrow">Sleeve decomposition</span>
+                      <h2>Overlap vs active</h2>
                     </div>
-                    <span className="info-chip">Poids normalisés</span>
+                    <span className="info-chip">Normalised weights</span>
                   </div>
                   <div className="overlap-layout">
                     <OverlapDonut comparison={comparison} />
                     <div className="overlap-copy">
                       <strong>
                         {comparison.overlapWeight >= 75
-                          ? "Deux expositions très proches"
+                          ? "Closely aligned exposures"
                           : comparison.overlapWeight >= 45
-                            ? "Un noyau commun significatif"
-                            : "Deux moteurs de performance distincts"}
+                            ? "Material shared core"
+                            : "Distinct exposure profiles"}
                       </strong>
                       <p>
-                        L’overlap additionne le poids minimal de chaque titre
-                        commun. Le solde de chaque portefeuille constitue sa sleeve
-                        active.
+                        Overlap is the sum of the lower weight for every shared
+                        security. Each portfolio&apos;s residual weight forms its
+                        active sleeve.
                       </p>
                       <SleeveBars comparison={comparison} />
                     </div>
@@ -684,7 +662,7 @@ export function ComparisonWorkbench({
                   <div className="panel-heading">
                     <div>
                       <span className="eyebrow">Allocation</span>
-                      <h2>Écart sectoriel</h2>
+                      <h2>Sector comparison</h2>
                     </div>
                     <div className="mini-legend">
                       <span><i style={{ background: COLORS.left }} />{comparison.left.etf.ticker}</span>
@@ -710,9 +688,8 @@ export function ComparisonWorkbench({
 
           <footer className="disclaimer">
             <span>IndexLens</span>
-            Données indicatives issues d’iShares lorsque disponibles. Les
-            holdings peuvent évoluer sans préavis. Ceci ne constitue pas un
-            conseil en investissement.
+            Indicative data sourced from iShares when available. Holdings may
+            change without notice. This is not investment advice.
           </footer>
         </div>
       </main>

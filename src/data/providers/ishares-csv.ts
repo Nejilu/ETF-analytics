@@ -80,7 +80,7 @@ export function parseIsharesHoldingsCsv(raw: string): ParsedHoldingsFile {
   );
 
   if (headerIndex < 0) {
-    throw new Error("En-têtes du fichier iShares introuvables.");
+    throw new Error("Unable to locate the iShares file headers.");
   }
 
   const headers = rows[headerIndex];
@@ -108,9 +108,9 @@ export function parseIsharesHoldingsCsv(raw: string): ParsedHoldingsFile {
           isin || `NAME:${name.toUpperCase().replace(/[^A-Z0-9]/g, "")}`,
         ticker,
         name,
-        sector: valueAt(row, sectorIndex, "Non classé"),
-        assetClass: valueAt(row, assetClassIndex, "Non classé"),
-        country: valueAt(row, countryIndex, "Non renseigné"),
+        sector: valueAt(row, sectorIndex, "Unclassified"),
+        assetClass: valueAt(row, assetClassIndex, "Unclassified"),
+        country: valueAt(row, countryIndex, "Not reported"),
         isin: isin || undefined,
         weight,
         marketValue: toNumber(valueAt(row, marketValueIndex)) || undefined,
@@ -120,7 +120,7 @@ export function parseIsharesHoldingsCsv(raw: string): ParsedHoldingsFile {
     .filter((holding): holding is Holding => holding !== null);
 
   if (holdings.length < 5) {
-    throw new Error("Le fichier iShares ne contient pas assez de positions.");
+    throw new Error("The iShares file does not contain enough holdings.");
   }
 
   return { asOf: parseDate(rows), holdings };

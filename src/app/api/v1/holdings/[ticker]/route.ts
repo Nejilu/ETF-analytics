@@ -10,7 +10,7 @@ export async function GET(
 ) {
   const { ticker } = await context.params;
   if (!getEtfByTicker(ticker)) {
-    return Response.json({ error: "ETF non pris en charge." }, { status: 404 });
+    return Response.json({ error: "Unsupported ETF." }, { status: 404 });
   }
 
   try {
@@ -27,7 +27,7 @@ export async function GET(
     if (error instanceof HoldingsUnavailableError) {
       return Response.json(
         {
-          error: `${error.message} Aucun chiffre de substitution n’est affiché.`,
+          error: `${error.message} No substitute figures are shown.`,
           unavailable: [error.ticker],
         },
         { status: 503, headers: { "Cache-Control": "no-store" } },

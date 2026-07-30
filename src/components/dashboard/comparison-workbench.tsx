@@ -23,7 +23,6 @@ import type {
 
 interface ComparisonWorkbenchProps {
   catalog: CatalogGroup[];
-  initialComparison: ComparisonResult;
 }
 
 type SelectionSide = "left" | "right";
@@ -394,18 +393,62 @@ function PositionRow({
   );
 }
 
+function DataUnavailableState({
+  leftTicker,
+  rightTicker,
+  hasError,
+  unavailable,
+}: {
+  leftTicker: string;
+  rightTicker: string;
+  hasError: boolean;
+  unavailable: string[];
+}) {
+  const isUnavailable = (ticker: string) =>
+    hasError && (unavailable.length === 0 || unavailable.includes(ticker));
+
+  return (
+    <section className={`panel no-data-panel ${hasError ? "no-data-panel--error" : ""}`}>
+      <div className="no-data-icon" aria-hidden="true">{hasError ? "!" : "↻"}</div>
+      <div className="no-data-copy">
+        <span className="eyebrow">
+          {hasError ? "Source indisponible" : "Données à la demande"}
+        </span>
+        <h2>
+          {hasError
+            ? "Aucun chiffre de substitution n’est affiché."
+            : "Chargez les holdings officiels pour commencer."}
+        </h2>
+        <p>
+          {hasError
+            ? "La comparaison reste vide tant que les fichiers iShares requis ne sont pas accessibles."
+            : "IndexLens interrogera directement iShares et conservera la réponse pendant 24 heures."}
+        </p>
+      </div>
+      <div className="availability-grid">
+        {[leftTicker, rightTicker].map((ticker) => (
+          <div className="availability-card" key={ticker}>
+            <strong>{ticker}</strong>
+            <span>Nombre de positions</span>
+            <b>{isUnavailable(ticker) ? "Indisponible" : "Non chargé"}</b>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function ComparisonWorkbench({
   catalog,
-  initialComparison,
 }: ComparisonWorkbenchProps) {
   const [leftBenchmark, setLeftBenchmark] = useState("sp-500");
   const [rightBenchmark, setRightBenchmark] = useState("msci-world");
   const [leftTicker, setLeftTicker] = useState("IVV");
   const [rightTicker, setRightTicker] = useState("SWDA");
-  const [comparison, setComparison] =
-    useState<ComparisonResult>(initialComparison);
+  const [comparison, setComparison] = useState<ComparisonResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState<string[]>([]);
 
   const onBenchmarkChange = (side: SelectionSide, benchmarkId: string) => {
     const benchmark = catalog.find((item) => item.id === benchmarkId);
@@ -426,6 +469,8 @@ export function ComparisonWorkbench({
   const compare = async () => {
     setLoading(true);
     setError(null);
+    setUnavailable([]);
+    setComparison(null);
     try {
       const response = await fetch(
         `/api/v1/compare?left=${encodeURIComponent(leftTicker)}&right=${encodeURIComponent(rightTicker)}`,
@@ -433,12 +478,19 @@ export function ComparisonWorkbench({
       const payload = (await response.json()) as {
         data?: ComparisonResult;
         error?: string;
+        unavailable?: string[];
       };
       if (!response.ok || !payload.data) {
-        throw new Error(payload.error ?? "La comparaison n’a pas pu être chargée.");
+        setUnavailable(payload.unavailable ?? []);
+        setError(
+          payload.error ??
+            "Les données iShares sont indisponibles. Aucun chiffre n’est affiché.",
+        );
+        return;
       }
       setComparison(payload.data);
     } catch (requestError) {
+      setUnavailable([leftTicker, rightTicker]);
       setError(
         requestError instanceof Error
           ? requestError.message
@@ -448,10 +500,6 @@ export function ComparisonWorkbench({
       setLoading(false);
     }
   };
-
-  const usesFallback =
-    comparison.left.sourceStatus === "fallback" ||
-    comparison.right.sourceStatus === "fallback";
 
   return (
     <div className="app-shell">
@@ -505,9 +553,9 @@ export function ComparisonWorkbench({
             Analyse <span>/</span> Comparateur ETF
           </div>
           <div className="topbar-actions">
-            <span className={`source-badge ${usesFallback ? "source-badge--demo" : ""}`}>
+            <span className={`source-badge ${error ? "source-badge--error" : comparison ? "" : "source-badge--idle"}`}>
               <i />
-              {usesFallback ? "Aperçu démo" : "Données en ligne"}
+              {error ? "Indisponible" : comparison ? "Données en ligne" : "Non chargé"}
             </span>
             <button className="icon-button" type="button" aria-label="Aide">
               ?
@@ -527,8 +575,14 @@ export function ComparisonWorkbench({
             </div>
             <div className="hero-note">
               <span>Dernier calcul</span>
-              <strong>{formatDate(comparison.calculatedAt)}</strong>
-              <small>Cache source · {comparison.cacheTtlHours} h</small>
+              <strong>
+                {comparison ? formatDate(comparison.calculatedAt) : "—"}
+              </strong>
+              <small>
+                {comparison
+                  ? `Cache source · ${comparison.cacheTtlHours} h`
+                  : "Données non chargées"}
+              </small>
             </div>
           </section>
 
@@ -561,93 +615,98 @@ export function ComparisonWorkbench({
                 {!loading && <b aria-hidden="true">→</b>}
               </button>
               <small>
-                {comparison.left.etf.ticker} au {formatDate(comparison.left.asOf)} ·{" "}
-                {comparison.right.etf.ticker} au {formatDate(comparison.right.asOf)}
+                {comparison
+                  ? `${comparison.left.etf.ticker} au ${formatDate(comparison.left.asOf)} · ${comparison.right.etf.ticker} au ${formatDate(comparison.right.asOf)}`
+                  : "Chargement direct depuis les fichiers officiels iShares"}
               </small>
             </div>
           </section>
 
           {error && <div className="alert alert--error">{error}</div>}
-          {comparison.warnings.length > 0 && (
-            <div className="alert">
-              <strong>Aperçu de démonstration.</strong> Les sources officielles
-              seront retentées lors de la prochaine actualisation serveur.
-            </div>
+          {comparison ? (
+            <>
+              <section className="metric-grid" aria-label="Indicateurs de comparaison">
+                <MetricCard
+                  label="Chevauchement pondéré"
+                  value={formatPercent(comparison.overlapWeight)}
+                  detail={`${comparison.sharedPositionsCount} lignes partagées`}
+                  tone="positive"
+                />
+                <MetricCard
+                  label={`Sleeve active ${comparison.left.etf.ticker}`}
+                  value={formatPercent(comparison.leftActiveWeight)}
+                  detail={`Top 10 = ${formatPercent(comparison.left.top10Concentration)}`}
+                  tone="left"
+                />
+                <MetricCard
+                  label={`Sleeve active ${comparison.right.etf.ticker}`}
+                  value={formatPercent(comparison.rightActiveWeight)}
+                  detail={`Top 10 = ${formatPercent(comparison.right.top10Concentration)}`}
+                  tone="right"
+                />
+                <MetricCard
+                  label="Univers analysé"
+                  value={`${comparison.left.holdingsCount} / ${comparison.right.holdingsCount}`}
+                  detail="positions dans chaque ETF"
+                />
+              </section>
+
+              <section className="analysis-grid">
+                <article className="panel overlap-panel">
+                  <div className="panel-heading">
+                    <div>
+                      <span className="eyebrow">Décomposition des sleeves</span>
+                      <h2>Commun vs actif</h2>
+                    </div>
+                    <span className="info-chip">Poids normalisés</span>
+                  </div>
+                  <div className="overlap-layout">
+                    <OverlapDonut comparison={comparison} />
+                    <div className="overlap-copy">
+                      <strong>
+                        {comparison.overlapWeight >= 75
+                          ? "Deux expositions très proches"
+                          : comparison.overlapWeight >= 45
+                            ? "Un noyau commun significatif"
+                            : "Deux moteurs de performance distincts"}
+                      </strong>
+                      <p>
+                        L’overlap additionne le poids minimal de chaque titre
+                        commun. Le solde de chaque portefeuille constitue sa sleeve
+                        active.
+                      </p>
+                      <SleeveBars comparison={comparison} />
+                    </div>
+                  </div>
+                </article>
+
+                <article className="panel sector-panel">
+                  <div className="panel-heading">
+                    <div>
+                      <span className="eyebrow">Allocation</span>
+                      <h2>Écart sectoriel</h2>
+                    </div>
+                    <div className="mini-legend">
+                      <span><i style={{ background: COLORS.left }} />{comparison.left.etf.ticker}</span>
+                      <span><i style={{ background: COLORS.right }} />{comparison.right.etf.ticker}</span>
+                    </div>
+                  </div>
+                  <SectorChart comparison={comparison} />
+                </article>
+              </section>
+
+              <div id="positions">
+                <PositionTable comparison={comparison} />
+              </div>
+            </>
+          ) : (
+            <DataUnavailableState
+              leftTicker={leftTicker}
+              rightTicker={rightTicker}
+              hasError={Boolean(error)}
+              unavailable={unavailable}
+            />
           )}
-
-          <section className="metric-grid" aria-label="Indicateurs de comparaison">
-            <MetricCard
-              label="Chevauchement pondéré"
-              value={formatPercent(comparison.overlapWeight)}
-              detail={`${comparison.sharedPositionsCount} lignes partagées`}
-              tone="positive"
-            />
-            <MetricCard
-              label={`Sleeve active ${comparison.left.etf.ticker}`}
-              value={formatPercent(comparison.leftActiveWeight)}
-              detail={`Top 10 = ${formatPercent(comparison.left.top10Concentration)}`}
-              tone="left"
-            />
-            <MetricCard
-              label={`Sleeve active ${comparison.right.etf.ticker}`}
-              value={formatPercent(comparison.rightActiveWeight)}
-              detail={`Top 10 = ${formatPercent(comparison.right.top10Concentration)}`}
-              tone="right"
-            />
-            <MetricCard
-              label="Univers analysé"
-              value={`${comparison.left.holdingsCount} / ${comparison.right.holdingsCount}`}
-              detail="positions dans chaque ETF"
-            />
-          </section>
-
-          <section className="analysis-grid">
-            <article className="panel overlap-panel">
-              <div className="panel-heading">
-                <div>
-                  <span className="eyebrow">Décomposition des sleeves</span>
-                  <h2>Commun vs actif</h2>
-                </div>
-                <span className="info-chip">Poids normalisés</span>
-              </div>
-              <div className="overlap-layout">
-                <OverlapDonut comparison={comparison} />
-                <div className="overlap-copy">
-                  <strong>
-                    {comparison.overlapWeight >= 75
-                      ? "Deux expositions très proches"
-                      : comparison.overlapWeight >= 45
-                        ? "Un noyau commun significatif"
-                        : "Deux moteurs de performance distincts"}
-                  </strong>
-                  <p>
-                    L’overlap additionne le poids minimal de chaque titre
-                    commun. Le solde de chaque portefeuille constitue sa sleeve
-                    active.
-                  </p>
-                  <SleeveBars comparison={comparison} />
-                </div>
-              </div>
-            </article>
-
-            <article className="panel sector-panel">
-              <div className="panel-heading">
-                <div>
-                  <span className="eyebrow">Allocation</span>
-                  <h2>Écart sectoriel</h2>
-                </div>
-                <div className="mini-legend">
-                  <span><i style={{ background: COLORS.left }} />{comparison.left.etf.ticker}</span>
-                  <span><i style={{ background: COLORS.right }} />{comparison.right.etf.ticker}</span>
-                </div>
-              </div>
-              <SectorChart comparison={comparison} />
-            </article>
-          </section>
-
-          <div id="positions">
-            <PositionTable comparison={comparison} />
-          </div>
 
           <footer className="disclaimer">
             <span>IndexLens</span>

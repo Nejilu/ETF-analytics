@@ -2,7 +2,6 @@ import "server-only";
 
 import { getEtfByTicker } from "@/data/catalog";
 import { parseIsharesHoldingsCsv } from "@/data/providers/ishares-csv";
-import { getSeedSnapshot } from "@/data/seed-holdings";
 import type { HoldingsSnapshot } from "@/domain/etf";
 
 const DEFAULT_TTL_SECONDS = 60 * 60 * 24;
@@ -12,6 +11,20 @@ function cacheTtlSeconds() {
   return Number.isFinite(configured) && configured > 0
     ? configured
     : DEFAULT_TTL_SECONDS;
+}
+
+export class HoldingsUnavailableError extends Error {
+  readonly ticker: string;
+
+  constructor(ticker: string, cause?: unknown) {
+    super(
+      cause instanceof Error
+        ? `Les holdings de ${ticker} sont indisponibles : ${cause.message}`
+        : `Les holdings de ${ticker} sont indisponibles.`,
+    );
+    this.name = "HoldingsUnavailableError";
+    this.ticker = ticker;
+  }
 }
 
 export async function getHoldingsSnapshot(
@@ -50,13 +63,6 @@ export async function getHoldingsSnapshot(
       holdings: parsed.holdings,
     };
   } catch (error) {
-    const fallback = getSeedSnapshot(etf.ticker);
-    return {
-      ...fallback,
-      warning:
-        error instanceof Error
-          ? `Source en ligne indisponible : ${error.message} Données de démonstration utilisées.`
-          : "Source en ligne indisponible. Données de démonstration utilisées.",
-    };
+    throw new HoldingsUnavailableError(etf.ticker, error);
   }
 }

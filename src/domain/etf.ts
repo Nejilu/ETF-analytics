@@ -1,6 +1,6 @@
 export type FundWrapper = "UCITS" | "US_1940_ACT";
 export type DistributionPolicy = "Accumulating" | "Distributing";
-export type DataStatus = "live" | "fallback";
+export type DataStatus = "live";
 
 export interface Benchmark {
   id: string;
@@ -50,7 +50,6 @@ export interface HoldingsSnapshot {
   sourceStatus: DataStatus;
   sourceUrl: string;
   cacheTtlHours: number;
-  warning?: string;
   holdings: Holding[];
 }
 
@@ -96,5 +95,4 @@ export interface ComparisonResult {
   sharedPositionsCount: number;
   positions: SleevePosition[];
   sectorComparison: SectorComparison[];
-  warnings: string[];
 }

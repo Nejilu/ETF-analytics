@@ -1,5 +1,8 @@
 import { getEtfByTicker } from "@/data/catalog";
-import { getHoldingsSnapshot } from "@/data/services/holdings-service";
+import {
+  getHoldingsSnapshot,
+  HoldingsUnavailableError,
+} from "@/data/services/holdings-service";
 
 export async function GET(
   _request: Request,
@@ -10,13 +13,26 @@ export async function GET(
     return Response.json({ error: "ETF non pris en charge." }, { status: 404 });
   }
 
-  return Response.json(
-    { data: await getHoldingsSnapshot(ticker) },
-    {
-      headers: {
-        "Cache-Control":
-          "public, max-age=300, s-maxage=86400, stale-while-revalidate=3600",
+  try {
+    return Response.json(
+      { data: await getHoldingsSnapshot(ticker) },
+      {
+        headers: {
+          "Cache-Control":
+            "public, max-age=300, s-maxage=86400, stale-while-revalidate=3600",
+        },
       },
-    },
-  );
+    );
+  } catch (error) {
+    if (error instanceof HoldingsUnavailableError) {
+      return Response.json(
+        {
+          error: `${error.message} Aucun chiffre de substitution n’est affiché.`,
+          unavailable: [error.ticker],
+        },
+        { status: 503, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    throw error;
+  }
 }

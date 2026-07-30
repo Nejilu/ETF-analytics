@@ -120,8 +120,5 @@ export function compareHoldings(
       .length,
     positions,
     sectorComparison: buildSectorComparison(leftHoldings, rightHoldings),
-    warnings: [leftSnapshot.warning, rightSnapshot.warning].filter(
-      (warning): warning is string => Boolean(warning),
-    ),
   };
 }

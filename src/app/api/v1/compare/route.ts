@@ -1,5 +1,8 @@
 import { getEtfByTicker } from "@/data/catalog";
-import { getHoldingsSnapshot } from "@/data/services/holdings-service";
+import {
+  getHoldingsSnapshot,
+  HoldingsUnavailableError,
+} from "@/data/services/holdings-service";
 import { compareHoldings } from "@/domain/processors/compare-holdings";
 
 export async function GET(request: Request) {
@@ -17,10 +20,40 @@ export async function GET(request: Request) {
     );
   }
 
-  const [left, right] = await Promise.all([
+  const snapshots = await Promise.allSettled([
     getHoldingsSnapshot(leftTicker),
     getHoldingsSnapshot(rightTicker),
   ]);
+
+  const unavailable = snapshots.flatMap((result) =>
+    result.status === "rejected" &&
+    result.reason instanceof HoldingsUnavailableError
+      ? [result.reason.ticker]
+      : [],
+  );
+
+  if (snapshots.some((result) => result.status === "rejected")) {
+    return Response.json(
+      {
+        error:
+          unavailable.length > 0
+            ? `Données indisponibles pour ${unavailable.join(" et ")}. Aucun chiffre de substitution n’est affiché.`
+            : "Les données iShares sont temporairement indisponibles.",
+        unavailable,
+      },
+      {
+        status: 503,
+        headers: { "Cache-Control": "no-store" },
+      },
+    );
+  }
+
+  const [left, right] = snapshots.map((result) => {
+    if (result.status !== "fulfilled") {
+      throw new Error("État de chargement incohérent.");
+    }
+    return result.value;
+  });
 
   return Response.json(
     { data: compareHoldings(left, right) },

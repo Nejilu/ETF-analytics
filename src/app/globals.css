@@ -307,13 +307,23 @@ select:focus-visible {
   width: 6px;
 }
 
-.source-badge--demo {
+.source-badge--idle {
+  background: #f3f4f6;
+  border-color: #e2e4e8;
+  color: #727884;
+}
+
+.source-badge--idle i {
+  background: #a4a9b2;
+}
+
+.source-badge--error {
   background: #fff8df;
   border-color: #f2e2a0;
   color: #8a6e12;
 }
 
-.source-badge--demo i {
+.source-badge--error i {
   background: #d9ad2b;
 }
 
@@ -896,6 +906,88 @@ select:focus-visible {
   overflow: hidden;
 }
 
+.no-data-panel {
+  align-items: center;
+  display: grid;
+  gap: 22px;
+  grid-template-columns: auto minmax(240px, 1fr) minmax(320px, 0.8fr);
+  margin-top: 14px;
+  min-height: 208px;
+  padding: 28px;
+}
+
+.no-data-panel--error {
+  border-color: #efd8d2;
+}
+
+.no-data-icon {
+  align-items: center;
+  background: var(--purple-soft);
+  border-radius: 50%;
+  color: var(--purple);
+  display: flex;
+  font-size: 21px;
+  font-weight: 700;
+  height: 54px;
+  justify-content: center;
+  width: 54px;
+}
+
+.no-data-panel--error .no-data-icon {
+  background: var(--coral-soft);
+  color: var(--coral);
+}
+
+.no-data-copy h2 {
+  font-size: 17px;
+  letter-spacing: -0.35px;
+  margin: 0;
+}
+
+.no-data-copy p {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+  margin: 8px 0 0;
+  max-width: 480px;
+}
+
+.availability-grid {
+  display: grid;
+  gap: 9px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.availability-card {
+  background: #f8f9fa;
+  border: 1px solid #eceef1;
+  border-radius: 11px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px;
+}
+
+.availability-card strong {
+  font-size: 12px;
+}
+
+.availability-card span {
+  color: #989da7;
+  font-size: 8px;
+}
+
+.availability-card b {
+  color: #696f7a;
+  font-size: 10px;
+  font-weight: 650;
+  margin-top: 4px;
+}
+
+.no-data-panel--error .availability-card b {
+  color: #b45845;
+}
+
 .panel-heading--table {
   align-items: center;
   padding: 18px 20px 14px;
@@ -1067,6 +1159,14 @@ tbody tr:hover {
     grid-template-columns: 1fr;
   }
 
+  .no-data-panel {
+    grid-template-columns: auto 1fr;
+  }
+
+  .availability-grid {
+    grid-column: 1 / -1;
+  }
+
   .sector-panel {
     min-height: 360px;
   }
@@ -1175,6 +1275,18 @@ tbody tr:hover {
 
   .metric-grid {
     grid-template-columns: 1fr;
+  }
+
+  .no-data-panel {
+    align-items: flex-start;
+    grid-template-columns: 1fr;
+    padding: 22px;
+  }
+
+  .availability-grid {
+    grid-column: auto;
+    grid-template-columns: 1fr;
+    width: 100%;
   }
 
   .metric-card {

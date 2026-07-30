@@ -31,6 +31,8 @@ application.
 - Ingest official iShares CSV files on the server.
 - Cache source files for 24 hours without synthetic or fallback figures.
 - Use a pure, reusable processor for weighted overlap and active sleeves.
+- Rank security-level active weights independently for either ETF.
+- Use a persistent light or dark interface theme.
 - Expose versioned endpoints: `/api/v1/catalog`,
   `/api/v1/holdings/:ticker` and
   `/api/v1/compare?left=IVV&right=SWDA`.

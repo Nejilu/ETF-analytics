@@ -12,7 +12,44 @@
   --coral-soft: #f6efed;
   --mint: #26775f;
   --mint-soft: #eaf4f0;
+  --left: #536b8a;
+  --overlap: #26775f;
+  --right: #9a6358;
+  --surface-subtle: #fafafa;
+  --surface-muted: #f3f4f6;
+  --surface-hover: #fbfbfc;
+  --topbar: rgba(255, 255, 255, 0.94);
+  --primary: #232731;
+  --primary-hover: #11141a;
+  --primary-ink: #ffffff;
   --shadow: 0 3px 12px rgba(26, 32, 42, 0.035);
+}
+
+[data-theme="dark"] {
+  --ink: #e7ebf0;
+  --muted: #a0a9b5;
+  --faint: #7f8996;
+  --line: #353d47;
+  --surface: #1b222a;
+  --canvas: #11161c;
+  --sidebar: #0c1117;
+  --purple: #829abb;
+  --purple-soft: #273443;
+  --coral: #c08275;
+  --coral-soft: #3a2b2a;
+  --mint: #56aa8f;
+  --mint-soft: #1d3832;
+  --left: #829abb;
+  --overlap: #56aa8f;
+  --right: #c08275;
+  --surface-subtle: #202730;
+  --surface-muted: #252d37;
+  --surface-hover: #232b35;
+  --topbar: rgba(20, 26, 33, 0.95);
+  --primary: #e6ebf1;
+  --primary-hover: #ffffff;
+  --primary-ink: #151a21;
+  --shadow: 0 3px 12px rgba(0, 0, 0, 0.18);
 }
 
 * {
@@ -256,7 +293,7 @@ select:focus-visible {
 
 .topbar {
   align-items: center;
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--topbar);
   border-bottom: 1px solid var(--line);
   backdrop-filter: blur(12px);
   display: flex;
@@ -325,14 +362,56 @@ select:focus-visible {
   background: #d9ad2b;
 }
 
+[data-theme="dark"] .source-badge {
+  border-color: var(--line);
+  color: var(--mint);
+}
+
+[data-theme="dark"] .source-badge--idle {
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
+[data-theme="dark"] .source-badge--error {
+  background: #392f1e;
+  color: #e0bd61;
+}
+
 .icon-button {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 50%;
-  color: #6e7480;
+  color: var(--muted);
   cursor: pointer;
   height: 30px;
   width: 30px;
+}
+
+.theme-toggle {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.theme-toggle--mobile {
+  display: none;
+}
+
+.theme-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.theme-icon--dark {
+  display: none;
+}
+
+[data-theme="dark"] .theme-icon--light {
+  display: none;
+}
+
+[data-theme="dark"] .theme-icon--dark {
+  display: inline;
 }
 
 .workspace {
@@ -368,11 +447,11 @@ select:focus-visible {
 }
 
 .fund-selector--left {
-  background: #fff;
+  background: var(--surface);
 }
 
 .fund-selector--right {
-  background: #fff;
+  background: var(--surface);
 }
 
 .fund-selector__eyebrow {
@@ -421,10 +500,10 @@ select:focus-visible {
   background:
     linear-gradient(45deg, transparent 50%, #7d838e 50%) right 15px top 52% / 5px 5px no-repeat,
     linear-gradient(135deg, #7d838e 50%, transparent 50%) right 10px top 52% / 5px 5px no-repeat,
-    #f8f9fa;
-  border: 1px solid #e6e8ec;
+    var(--surface-subtle);
+  border: 1px solid var(--line);
   border-radius: 5px;
-  color: #30343d;
+  color: var(--ink);
   cursor: pointer;
   font-size: 11px;
   font-weight: 620;
@@ -506,11 +585,11 @@ select:focus-visible {
 }
 
 .versus {
-  background: #fff;
+  background: var(--surface);
 }
 
 .versus::after {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 50%;
   box-shadow: none;
@@ -533,7 +612,7 @@ select:focus-visible {
 
 .builder-action {
   align-items: center;
-  background: #fafafa;
+  background: var(--surface-subtle);
   border-top: 1px solid var(--line);
   display: flex;
   grid-column: 1 / -1;
@@ -551,10 +630,10 @@ select:focus-visible {
 
 .primary-button {
   align-items: center;
-  background: #232731;
+  background: var(--primary);
   border: 0;
   border-radius: 5px;
-  color: #fff;
+  color: var(--primary-ink);
   cursor: pointer;
   display: flex;
   font-size: 11px;
@@ -570,7 +649,7 @@ select:focus-visible {
 }
 
 .primary-button:hover:not(:disabled) {
-  background: #11141a;
+  background: var(--primary-hover);
   transform: translateY(-1px);
 }
 
@@ -585,9 +664,9 @@ select:focus-visible {
 
 .spinner {
   animation: spin 700ms linear infinite;
-  border: 2px solid rgba(255, 255, 255, 0.25);
+  border: 2px solid color-mix(in srgb, var(--primary-ink) 25%, transparent);
   border-radius: 50%;
-  border-top-color: #fff;
+  border-top-color: var(--primary-ink);
   height: 16px;
   width: 16px;
 }
@@ -615,6 +694,18 @@ select:focus-visible {
   color: #9a4939;
 }
 
+[data-theme="dark"] .alert {
+  background: #342f1f;
+  border-color: #5c5030;
+  color: #dbc57c;
+}
+
+[data-theme="dark"] .alert--error {
+  background: #392725;
+  border-color: #67403a;
+  color: #e2a294;
+}
+
 .metric-grid {
   display: grid;
   gap: 12px;
@@ -623,7 +714,7 @@ select:focus-visible {
 }
 
 .metric-card {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 7px;
   box-shadow: none;
@@ -683,7 +774,7 @@ select:focus-visible {
 }
 
 .panel {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: var(--shadow);
@@ -708,8 +799,8 @@ select:focus-visible {
 }
 
 .info-chip {
-  background: #f5f6f8;
-  border: 1px solid #eceef1;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
   border-radius: 4px;
   color: #8c929d;
   font-size: 8px;
@@ -782,7 +873,7 @@ select:focus-visible {
 }
 
 .sleeve-track {
-  background: #eef0f3;
+  background: var(--surface-muted);
   border-radius: 5px;
   display: flex;
   height: 8px;
@@ -816,7 +907,7 @@ select:focus-visible {
 }
 
 .legend {
-  border-top: 1px solid #eff0f2;
+  border-top: 1px solid var(--line);
   margin-top: 3px;
   padding-top: 10px;
 }
@@ -910,8 +1001,8 @@ select:focus-visible {
 }
 
 .availability-card {
-  background: #f8f9fa;
-  border: 1px solid #eceef1;
+  background: var(--surface-subtle);
+  border: 1px solid var(--line);
   border-radius: 6px;
   display: grid;
   gap: 4px;
@@ -944,8 +1035,28 @@ select:focus-visible {
   padding: 18px 20px 14px;
 }
 
+.table-controls {
+  align-items: flex-end;
+  display: flex;
+  gap: 10px;
+}
+
+.rank-control {
+  align-items: flex-end;
+  display: flex;
+  gap: 7px;
+}
+
+.rank-control > span {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 650;
+  padding-bottom: 6px;
+  text-transform: uppercase;
+}
+
 .segmented-control {
-  background: #f4f5f7;
+  background: var(--surface-muted);
   border-radius: 5px;
   display: flex;
   padding: 3px;
@@ -962,9 +1073,9 @@ select:focus-visible {
 }
 
 .segmented-control button.is-active {
-  background: #fff;
+  background: var(--surface);
   box-shadow: 0 1px 3px rgba(31, 36, 45, 0.1);
-  color: #2f333c;
+  color: var(--ink);
   font-weight: 650;
 }
 
@@ -979,7 +1090,7 @@ table {
 }
 
 th {
-  background: #fafafa;
+  background: var(--surface-subtle);
   border-bottom: 1px solid var(--line);
   border-top: 1px solid var(--line);
   color: #9297a1;
@@ -1004,8 +1115,8 @@ td:last-child {
 }
 
 td {
-  border-bottom: 1px solid #eff0f2;
-  color: #555b66;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
   font-size: 10px;
   padding: 9px 16px;
   text-align: right;
@@ -1016,7 +1127,7 @@ tbody tr:last-child td {
 }
 
 tbody tr:hover {
-  background: #fbfbfc;
+  background: var(--surface-hover);
 }
 
 .security-cell {
@@ -1027,7 +1138,7 @@ tbody tr:hover {
 
 .security-avatar {
   align-items: center;
-  background: #f1f2f5;
+  background: var(--surface-muted);
   border-radius: 4px;
   color: #6f7580;
   display: flex;
@@ -1044,7 +1155,7 @@ tbody tr:hover {
 }
 
 .security-cell strong {
-  color: #333740;
+  color: var(--ink);
   font-size: 10px;
   margin-bottom: 2px;
 }
@@ -1061,7 +1172,7 @@ tbody tr:hover {
 .overlap-pill {
   background: var(--mint-soft);
   border-radius: 4px;
-  color: #1b8d75;
+  color: var(--mint);
   display: inline-block;
   font-size: 9px;
   padding: 4px 7px;
@@ -1142,6 +1253,14 @@ tbody tr:hover {
   .brand-mark {
     height: 26px;
     width: 26px;
+  }
+
+  .theme-toggle--mobile {
+    display: inline-flex;
+    margin-left: auto;
+    position: absolute;
+    right: 18px;
+    top: 16px;
   }
 
   .main-nav,
@@ -1249,7 +1368,18 @@ tbody tr:hover {
 
   .panel-heading--table {
     align-items: flex-start;
+    flex-direction: column;
     gap: 12px;
+  }
+
+  .table-controls {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .rank-control {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .disclaimer {

@@ -28,10 +28,10 @@ interface ComparisonWorkbenchProps {
 type SelectionSide = "left" | "right";
 
 const COLORS = {
-  left: "#536b8a",
-  overlap: "#26775f",
-  right: "#9a6358",
-  track: "#dfe3e8",
+  left: "var(--left)",
+  overlap: "var(--overlap)",
+  right: "var(--right)",
+  track: "var(--line)",
 };
 
 function formatPercent(value: number, digits = 1) {
@@ -45,6 +45,29 @@ function formatDate(value: string) {
 
 function wrapperLabel(etf: EtfShareClass) {
   return etf.wrapper === "UCITS" ? "UCITS" : "US";
+}
+
+function ThemeToggle({ mobile = false }: { mobile?: boolean }) {
+  const toggleTheme = () => {
+    const root = document.documentElement;
+    const nextTheme = root.dataset.theme === "dark" ? "light" : "dark";
+    root.dataset.theme = nextTheme;
+    root.style.colorScheme = nextTheme;
+    localStorage.setItem("indexlens-theme", nextTheme);
+  };
+
+  return (
+    <button
+      className={`icon-button theme-toggle${mobile ? " theme-toggle--mobile" : ""}`}
+      type="button"
+      aria-label="Toggle color theme"
+      title="Toggle color theme"
+      onClick={toggleTheme}
+    >
+      <span className="theme-icon theme-icon--light" aria-hidden="true">☾</span>
+      <span className="theme-icon theme-icon--dark" aria-hidden="true">☀</span>
+    </button>
+  );
 }
 
 function FundSelector({
@@ -163,9 +186,11 @@ function OverlapDonut({ comparison }: { comparison: ComparisonResult }) {
           <Tooltip
             formatter={(value) => formatPercent(Number(value))}
             contentStyle={{
-              border: "1px solid #e7e9ee",
-              borderRadius: 12,
-              boxShadow: "0 12px 30px rgba(29, 34, 44, .12)",
+              background: "var(--surface)",
+              border: "1px solid var(--line)",
+              borderRadius: 6,
+              color: "var(--ink)",
+              boxShadow: "var(--shadow)",
             }}
           />
         </PieChart>
@@ -241,13 +266,13 @@ function SectorChart({ comparison }: { comparison: ComparisonResult }) {
         layout="vertical"
         margin={{ top: 8, right: 8, bottom: 0, left: 4 }}
       >
-        <CartesianGrid horizontal={false} stroke="#eceef2" />
+        <CartesianGrid horizontal={false} stroke="var(--line)" />
         <XAxis
           type="number"
           tickFormatter={(value) => `${value}%`}
           axisLine={false}
           tickLine={false}
-          tick={{ fill: "#8b909d", fontSize: 11 }}
+          tick={{ fill: "var(--muted)", fontSize: 11 }}
         />
         <YAxis
           type="category"
@@ -255,15 +280,17 @@ function SectorChart({ comparison }: { comparison: ComparisonResult }) {
           width={118}
           axisLine={false}
           tickLine={false}
-          tick={{ fill: "#555b68", fontSize: 11 }}
+          tick={{ fill: "var(--muted)", fontSize: 11 }}
         />
         <Tooltip
           formatter={(value) => formatPercent(Number(value))}
           cursor={{ fill: "#f6f7f9" }}
           contentStyle={{
-            border: "1px solid #e7e9ee",
-            borderRadius: 12,
-            boxShadow: "0 12px 30px rgba(29, 34, 44, .12)",
+            background: "var(--surface)",
+            border: "1px solid var(--line)",
+            borderRadius: 6,
+            color: "var(--ink)",
+            boxShadow: "var(--shadow)",
           }}
         />
         <Bar
@@ -287,44 +314,83 @@ function SectorChart({ comparison }: { comparison: ComparisonResult }) {
 
 function PositionTable({ comparison }: { comparison: ComparisonResult }) {
   const [filter, setFilter] = useState<"active" | "overlap">("active");
+  const [activeRankSide, setActiveRankSide] =
+    useState<SelectionSide>("left");
+  const activeWeightField =
+    activeRankSide === "left" ? "leftActiveWeight" : "rightActiveWeight";
+  const activeRankTicker =
+    activeRankSide === "left"
+      ? comparison.left.etf.ticker
+      : comparison.right.etf.ticker;
+
   const rows = useMemo(() => {
     const filtered = comparison.positions.filter((position) =>
       filter === "active"
-        ? position.leftActiveWeight > 0 || position.rightActiveWeight > 0
+        ? position[activeWeightField] > 0
         : position.overlapWeight > 0,
     );
     return filtered
       .sort((a, b) =>
         filter === "active"
-          ? Math.max(b.leftActiveWeight, b.rightActiveWeight) -
-            Math.max(a.leftActiveWeight, a.rightActiveWeight)
+          ? b[activeWeightField] - a[activeWeightField]
           : b.overlapWeight - a.overlapWeight,
       )
       .slice(0, 10);
-  }, [comparison, filter]);
+  }, [activeWeightField, comparison, filter]);
 
   return (
     <section className="panel positions-panel">
       <div className="panel-heading panel-heading--table">
         <div>
           <span className="eyebrow">Security-level analysis</span>
-          <h2>{filter === "active" ? "Largest active weights" : "Largest shared positions"}</h2>
+          <h2>
+            {filter === "active"
+              ? `Largest ${activeRankTicker} active weights`
+              : "Largest shared positions"}
+          </h2>
         </div>
-        <div className="segmented-control" aria-label="Filter positions">
-          <button
-            type="button"
-            className={filter === "active" ? "is-active" : ""}
-            onClick={() => setFilter("active")}
-          >
-            Active
-          </button>
-          <button
-            type="button"
-            className={filter === "overlap" ? "is-active" : ""}
-            onClick={() => setFilter("overlap")}
-          >
-            Shared
-          </button>
+        <div className="table-controls">
+          {filter === "active" ? (
+            <div className="rank-control">
+              <span>Rank active sleeve</span>
+              <div className="segmented-control" aria-label="Rank active sleeve by ETF">
+                <button
+                  type="button"
+                  aria-pressed={activeRankSide === "left"}
+                  className={activeRankSide === "left" ? "is-active" : ""}
+                  onClick={() => setActiveRankSide("left")}
+                >
+                  {comparison.left.etf.ticker}
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={activeRankSide === "right"}
+                  className={activeRankSide === "right" ? "is-active" : ""}
+                  onClick={() => setActiveRankSide("right")}
+                >
+                  {comparison.right.etf.ticker}
+                </button>
+              </div>
+            </div>
+          ) : null}
+          <div className="segmented-control" aria-label="Filter positions">
+            <button
+              type="button"
+              aria-pressed={filter === "active"}
+              className={filter === "active" ? "is-active" : ""}
+              onClick={() => setFilter("active")}
+            >
+              Active
+            </button>
+            <button
+              type="button"
+              aria-pressed={filter === "overlap"}
+              className={filter === "overlap" ? "is-active" : ""}
+              onClick={() => setFilter("overlap")}
+            >
+              Shared
+            </button>
+          </div>
         </div>
       </div>
       <div className="table-scroll">
@@ -512,6 +578,7 @@ export function ComparisonWorkbench({
           </span>
           <span>IndexLens</span>
         </div>
+        <ThemeToggle mobile />
         <nav className="main-nav" aria-label="Primary navigation">
           <a className="nav-item nav-item--active" href="#comparison">
             <span className="nav-icon">↔</span>
@@ -557,9 +624,7 @@ export function ComparisonWorkbench({
               <i />
               {error ? "Unavailable" : comparison ? "Live data" : "Not loaded"}
             </span>
-            <button className="icon-button" type="button" aria-label="Help">
-              ?
-            </button>
+            <ThemeToggle />
           </div>
         </header>
 

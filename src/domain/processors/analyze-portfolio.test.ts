@@ -4,6 +4,7 @@ import test from "node:test";
 import type { HoldingsSnapshot } from "../etf";
 import type { PortfolioItem, PortfolioSecurity } from "../portfolio";
 import { analyzePortfolio } from "./analyze-portfolio";
+import { valuePortfolioPositions } from "./value-portfolio";
 
 const apple: PortfolioSecurity = {
   securityId: "US0378331005",
@@ -187,4 +188,130 @@ test("rejects allocations above 100%", () => {
       }),
     /cannot exceed 100%/,
   );
+});
+
+test("recalculates component weights when prices diverge while shares stay fixed", () => {
+  const items: PortfolioItem[] = [
+    {
+      id: "fund",
+      kind: "etf",
+      referenceId: "acwi-us",
+      ticker: "ACWI",
+      name: "iShares MSCI ACWI ETF",
+      allocationWeight: 50,
+      quantity: 10,
+    },
+    {
+      id: "stock",
+      kind: "security",
+      referenceId: apple.securityId,
+      ticker: apple.ticker,
+      name: apple.name,
+      allocationWeight: 50,
+      quantity: 5,
+    },
+  ];
+  const marketPrice = (assetKind: "etf" | "security", assetId: string, priceUsd: number) => ({
+    assetKind,
+    assetId,
+    providerSymbol: assetKind === "etf" ? "ACWI" : "AAPL",
+    price: priceUsd,
+    currency: "USD",
+    fxToUsd: 1,
+    priceUsd,
+    asOf: "2026-07-31T00:00:00.000Z",
+    fetchedAt: "2026-07-31T00:00:00.000Z",
+    sourceStatus: "cached" as const,
+  });
+
+  const initial = valuePortfolioPositions(
+    items,
+    new Map([
+      ["etf:acwi-us", marketPrice("etf", "acwi-us", 100)],
+      ["security:US0378331005", marketPrice("security", apple.securityId, 200)],
+    ]),
+  );
+  const diverged = valuePortfolioPositions(
+    items,
+    new Map([
+      ["etf:acwi-us", marketPrice("etf", "acwi-us", 150)],
+      ["security:US0378331005", marketPrice("security", apple.securityId, 200)],
+    ]),
+  );
+
+  assert.equal(initial.items[0].allocationWeight, 50);
+  assert.equal(initial.items[1].allocationWeight, 50);
+  assert.equal(diverged.items[0].allocationWeight, 60);
+  assert.equal(diverged.items[1].allocationWeight, 40);
+  assert.equal(diverged.totalMarketValueUsd, 2_500);
+});
+
+test("merges Alphabet share classes in portfolio look-through weights", () => {
+  const alphabetSnapshot = {
+    ...snapshot,
+    holdings: [
+      {
+        ...apple,
+        securityId: "alphabet-a",
+        ticker: "GOOGL",
+        name: "ALPHABET INC CLASS A",
+        weight: 55,
+      },
+      {
+        ...microsoft,
+        securityId: "alphabet-c",
+        ticker: "GOOG",
+        name: "ALPHABET INC CLASS C",
+        weight: 45,
+      },
+    ],
+  } as HoldingsSnapshot;
+
+  const result = analyzePortfolio({
+    items: [
+      {
+        id: "fund",
+        kind: "etf",
+        referenceId: "acwi-us",
+        ticker: "ACWI",
+        name: "iShares MSCI ACWI ETF",
+        allocationWeight: 100,
+      },
+    ],
+    etfSnapshots: new Map([["acwi-us", alphabetSnapshot]]),
+    directSecurities: new Map(),
+  });
+
+  assert.equal(result.positions.length, 1);
+  assert.equal(result.positions[0].ticker, "GOOG / GOOGL");
+  assert.equal(result.positions[0].weight, 100);
+});
+
+test("preserves leveraged ETF exposure above portfolio NAV", () => {
+  const leveragedSnapshot = {
+    ...snapshot,
+    etf: {
+      ...snapshot.etf,
+      exposureMultiplier: 2,
+    },
+    holdings: [{ ...apple, weight: 200 }],
+  } as HoldingsSnapshot;
+
+  const result = analyzePortfolio({
+    items: [
+      {
+        id: "qld",
+        kind: "etf",
+        referenceId: "qld-us",
+        ticker: "QLD",
+        name: "ProShares Ultra QQQ",
+        allocationWeight: 50,
+      },
+    ],
+    etfSnapshots: new Map([["qld-us", leveragedSnapshot]]),
+    directSecurities: new Map(),
+  });
+
+  assert.equal(result.positions[0].weight, 100);
+  assert.equal(result.cashWeight, 50);
 });

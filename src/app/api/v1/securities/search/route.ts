@@ -2,6 +2,7 @@ import {
   getHoldingsSnapshot,
   HoldingsUnavailableError,
 } from "@/data/services/holdings-service";
+import { securityQuoteAlias } from "@/domain/security-equivalence";
 
 const MAX_RESULTS = 12;
 
@@ -18,27 +19,53 @@ export async function GET(request: Request) {
   try {
     const acwi = await getHoldingsSnapshot("ACWI");
     const matches = acwi.holdings
-      .filter((holding) => {
+      .map((holding) => ({
+        holding,
+        alias: securityQuoteAlias(holding),
+      }))
+      .filter(({ holding, alias }) => {
         if (!holding.ticker || holding.ticker === "—") return false;
-        const ticker = normalized(holding.ticker);
-        const name = normalized(holding.name);
-        return ticker.includes(query) || name.includes(query);
+        const searchable = [
+          holding.ticker,
+          holding.name,
+          alias?.displayTicker,
+          alias?.providerSymbol,
+          alias?.instrumentType,
+        ]
+          .filter((value): value is string => Boolean(value))
+          .map(normalized);
+        return searchable.some((value) => value.includes(query));
       })
       .sort((left, right) => {
-        const leftTicker = normalized(left.ticker);
-        const rightTicker = normalized(right.ticker);
-        const leftScore = leftTicker === query ? 0 : leftTicker.startsWith(query) ? 1 : 2;
-        const rightScore =
-          rightTicker === query ? 0 : rightTicker.startsWith(query) ? 1 : 2;
-        return leftScore - rightScore || right.weight - left.weight;
+        const score = (candidate: typeof left) => {
+          const tickers = [
+            candidate.alias?.displayTicker,
+            candidate.alias?.providerSymbol,
+            candidate.holding.ticker,
+          ]
+            .filter((value): value is string => Boolean(value))
+            .map(normalized);
+          return tickers.includes(query)
+            ? 0
+            : tickers.some((ticker) => ticker.startsWith(query))
+              ? 1
+              : 2;
+        };
+        return (
+          score(left) - score(right) ||
+          right.holding.weight - left.holding.weight
+        );
       })
       .slice(0, MAX_RESULTS)
-      .map((holding) => ({
+      .map(({ holding, alias }) => ({
         securityId: holding.securityId,
-        ticker: holding.ticker,
+        ticker: alias?.displayTicker ?? holding.ticker,
         name: holding.name,
         sector: holding.sector,
         country: holding.country,
+        quoteSymbol: alias?.providerSymbol,
+        instrumentType: alias?.instrumentType,
+        underlyingTicker: alias?.underlyingTicker,
       }));
 
     return Response.json(

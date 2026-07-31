@@ -1,0 +1,124 @@
+import type { Holding } from "./etf";
+
+type SecurityDescriptor = Pick<Holding, "securityId" | "ticker" | "name">;
+type QuoteDescriptor = Pick<Holding, "ticker" | "name">;
+
+interface EconomicSecurityGroup {
+  key: string;
+  displayTicker: string;
+  displayName: string;
+  tickers: string[];
+  nameIncludes: string[];
+}
+
+export interface SecurityQuoteAlias {
+  displayTicker: string;
+  providerSymbol: string;
+  instrumentType: "ADR" | "GDR";
+  underlyingTicker: string;
+}
+
+const ECONOMIC_GROUPS: EconomicSecurityGroup[] = [
+  {
+    key: "alphabet",
+    displayTicker: "GOOG / GOOGL",
+    displayName: "ALPHABET INC",
+    tickers: ["GOOG", "GOOGL"],
+    nameIncludes: ["ALPHABET INC"],
+  },
+  {
+    key: "taiwan-semiconductor",
+    displayTicker: "TSM / 2330",
+    displayName: "TAIWAN SEMICONDUCTOR MANUFACTURING",
+    tickers: ["TSM", "2330", "2330.TW"],
+    nameIncludes: ["TAIWAN SEMICONDUCTOR MANUFACTURING"],
+  },
+  {
+    key: "sk-hynix",
+    displayTicker: "HY9H / 000660",
+    displayName: "SK HYNIX INC",
+    tickers: ["HY9H", "HY9H.F", "000660", "000660.KS"],
+    nameIncludes: ["SK HYNIX"],
+  },
+];
+
+function normalized(value: string): string {
+  return value.trim().toLocaleUpperCase("en-US");
+}
+
+function findEconomicGroup(
+  security: Pick<SecurityDescriptor, "ticker" | "name">,
+): EconomicSecurityGroup | undefined {
+  const ticker = normalized(security.ticker);
+  const name = normalized(security.name);
+  return ECONOMIC_GROUPS.find(
+    (group) =>
+      group.tickers.includes(ticker) ||
+      group.nameIncludes.some((fragment) => name.includes(fragment)),
+  );
+}
+
+export function economicSecurityIdentity(
+  security: SecurityDescriptor,
+): SecurityDescriptor {
+  const group = findEconomicGroup(security);
+  if (!group) return security;
+
+  return {
+    securityId: `economic:${group.key}`,
+    ticker: group.displayTicker,
+    name: group.displayName,
+  };
+}
+
+export function securityQuoteAlias(
+  security: QuoteDescriptor,
+): SecurityQuoteAlias | undefined {
+  const group = findEconomicGroup(security);
+  if (group?.key === "taiwan-semiconductor") {
+    return {
+      displayTicker: "TSM",
+      providerSymbol: "TSM",
+      instrumentType: "ADR",
+      underlyingTicker: security.ticker,
+    };
+  }
+  if (group?.key === "sk-hynix") {
+    return {
+      displayTicker: "HY9H",
+      providerSymbol: "HY9H.F",
+      instrumentType: "GDR",
+      underlyingTicker: security.ticker,
+    };
+  }
+  return undefined;
+}
+
+export function mergeEquivalentHoldings(
+  holdings: Holding[],
+): Holding[] {
+  const merged = new Map<string, Holding>();
+
+  for (const holding of holdings) {
+    const identity = economicSecurityIdentity(holding);
+    const existing = merged.get(identity.securityId);
+    if (!existing) {
+      merged.set(identity.securityId, {
+        ...holding,
+        ...identity,
+      });
+      continue;
+    }
+
+    existing.weight += holding.weight;
+    existing.marketValue =
+      existing.marketValue !== undefined &&
+      holding.marketValue !== undefined
+        ? existing.marketValue + holding.marketValue
+        : undefined;
+  }
+
+  return [...merged.values()].sort(
+    (left, right) => right.weight - left.weight,
+  );
+}

@@ -124,3 +124,40 @@ test("falls back to official weights when market values are incomplete", () => {
   assert.equal(result.overlapWeight, 100);
   assert.equal(result.leftActiveWeight, 0);
 });
+
+test("shows Alphabet share classes as one economic position", () => {
+  const result = compareHoldings(
+    snapshot("LEFT", [
+      holding("alphabet-a", "GOOGL", 20),
+      holding("alphabet-c", "GOOG", 30),
+      holding("other", "OTHER", 50),
+    ]),
+    snapshot("RIGHT", [
+      holding("alphabet-a", "GOOGL", 40),
+      holding("other", "OTHER", 60),
+    ]),
+  );
+
+  const alphabet = result.positions.find(
+    (position) => position.ticker === "GOOG / GOOGL",
+  );
+  assert.equal(alphabet?.leftWeight, 50);
+  assert.equal(alphabet?.rightWeight, 40);
+  assert.equal(result.left.holdingsCount, 2);
+  assert.equal(result.right.holdingsCount, 2);
+});
+
+test("keeps 2x exposure when comparing a leveraged ETF with its source", () => {
+  const qld = snapshot("QLD", [holding("A", "A", 200)]);
+  qld.etf.exposureMultiplier = 2;
+  const result = compareHoldings(
+    qld,
+    snapshot("IQQ", [holding("A", "A", 100)]),
+  );
+
+  assert.equal(result.positions[0].leftWeight, 200);
+  assert.equal(result.positions[0].rightWeight, 100);
+  assert.equal(result.overlapWeight, 100);
+  assert.equal(result.leftActiveWeight, 100);
+  assert.equal(result.rightActiveWeight, 0);
+});

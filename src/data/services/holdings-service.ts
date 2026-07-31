@@ -3,7 +3,11 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 import { parseIsharesHoldingsCsv } from "@/data/providers/ishares-csv";
-import { fetchIsharesHoldingsFile } from "@/data/providers/ishares-source";
+import {
+  assertPlausibleIsharesHoldingsCount,
+  fetchIsharesHoldingsFile,
+  isPlausibleIsharesHoldingsCount,
+} from "@/data/providers/ishares-source";
 import {
   findLatestSnapshot,
   loadSnapshot,
@@ -12,12 +16,18 @@ import {
 import { ensureLocalDatabase } from "@/db/bootstrap";
 import {
   findEtfById,
-  findEtfByTicker,
+  findEtfByReference,
   findSecuritiesByIds,
 } from "@/db/repositories/catalog-repository";
-import { loadPortfolioById } from "@/db/repositories/portfolio-repository";
+import {
+  anchorPortfolioQuantities,
+  loadPortfolioById,
+} from "@/db/repositories/portfolio-repository";
 import type { HoldingsSnapshot } from "@/domain/etf";
 import { analyzePortfolio } from "@/domain/processors/analyze-portfolio";
+import { deriveMarketValueHoldings } from "@/domain/processors/derive-market-value-holdings";
+import { normalizeHoldingWeights } from "@/domain/processors/normalize-holding-weights";
+import { valuePortfolioItems } from "./market-price-service";
 
 const DEFAULT_TTL_SECONDS = 60 * 60 * 24;
 const inFlightRefreshes = new Map<
@@ -42,8 +52,9 @@ function isFresh(fetchedAt: string, ttlSeconds: number): boolean {
 
 export class HoldingsUnavailableError extends Error {
   readonly ticker: string;
+  readonly reference: string;
 
-  constructor(ticker: string, cause?: unknown) {
+  constructor(ticker: string, reference: string, cause?: unknown) {
     super(
       cause instanceof Error
         ? `Holdings for ${ticker} are unavailable: ${cause.message}`
@@ -51,11 +62,12 @@ export class HoldingsUnavailableError extends Error {
     );
     this.name = "HoldingsUnavailableError";
     this.ticker = ticker;
+    this.reference = reference;
   }
 }
 
 async function buildPortfolioEtfSnapshot(
-  etf: NonNullable<ReturnType<typeof findEtfByTicker>>,
+  etf: NonNullable<ReturnType<typeof findEtfByReference>>,
 ): Promise<HoldingsSnapshot> {
   if (!etf.portfolioId) {
     throw new Error(`Portfolio definition for ${etf.ticker} is missing.`);
@@ -64,8 +76,12 @@ async function buildPortfolioEtfSnapshot(
   if (!portfolio || portfolio.items.length === 0) {
     throw new Error(`Portfolio definition for ${etf.ticker} is empty.`);
   }
+  const valuedPortfolio = await valuePortfolioItems(portfolio.items);
+  if (portfolio.items.some((item) => !item.quantity)) {
+    anchorPortfolioQuantities(portfolio.id, valuedPortfolio.items);
+  }
 
-  const etfItems = portfolio.items.filter((item) => item.kind === "etf");
+  const etfItems = valuedPortfolio.items.filter((item) => item.kind === "etf");
   for (const item of etfItems) {
     const component = findEtfById(item.referenceId);
     if (!component || component.fundType === "portfolio") {
@@ -76,17 +92,17 @@ async function buildPortfolioEtfSnapshot(
   }
 
   const snapshots = await Promise.all(
-    etfItems.map((item) => getHoldingsSnapshot(item.ticker)),
+    etfItems.map((item) => getHoldingsSnapshot(item.referenceId)),
   );
   const directSecurities = findSecuritiesByIds(
-    portfolio.items
+    valuedPortfolio.items
       .filter((item) => item.kind === "security")
       .map((item) => item.referenceId),
   );
   const analysis = analyzePortfolio({
-    items: portfolio.items,
+    items: valuedPortfolio.items,
     etfSnapshots: new Map(
-      snapshots.map((snapshot) => [snapshot.etf.ticker, snapshot]),
+      snapshots.map((snapshot) => [snapshot.etf.id, snapshot]),
     ),
     directSecurities,
   });
@@ -121,59 +137,188 @@ async function buildPortfolioEtfSnapshot(
   };
 }
 
+async function buildDerivedEtfSnapshot(
+  etf: NonNullable<ReturnType<typeof findEtfByReference>>,
+): Promise<HoldingsSnapshot> {
+  const definition = etf.derivedHoldings;
+  if (!definition) {
+    throw new Error(`Derived holdings definition for ${etf.ticker} is missing.`);
+  }
+  if (definition.sourceEtfId === etf.id) {
+    throw new Error(`${etf.ticker} cannot derive its holdings from itself.`);
+  }
+
+  const ttlHours = cacheTtlSeconds() / 3600;
+  const latest = findLatestSnapshot(etf.id);
+
+  try {
+    const source = await getHoldingsSnapshot(definition.sourceEtfId);
+    let constituentCoverage: HoldingsSnapshot["constituentCoverage"];
+    const derivedHoldings = (() => {
+      if (definition.model === "scaled-source") {
+        return normalizeHoldingWeights(source.holdings).map((holding) => ({
+          ...holding,
+          weight: holding.weight * definition.exposureMultiplier,
+          marketValue: undefined,
+        }));
+      }
+
+      const derived = deriveMarketValueHoldings(
+        source.holdings,
+        definition.componentTickers,
+        { missingComponentPolicy: definition.missingComponentPolicy },
+      );
+      if (derived.missingTickers.length > 0) {
+        constituentCoverage = {
+          used: derived.holdings.length,
+          total: definition.componentTickers.length,
+          missingTickers: derived.missingTickers,
+        };
+      }
+      return derived.holdings;
+    })();
+    const fetchedAt = new Date().toISOString();
+    const sourceHash = createHash("sha256")
+      .update(
+        JSON.stringify({
+          model: definition.model,
+          sourceEtfId: source.etf.id,
+          sourceAsOf: source.asOf,
+          definition,
+          holdings: derivedHoldings.map((holding) => [
+            holding.ticker,
+            holding.weight,
+            holding.marketValue ?? null,
+          ]),
+        }),
+      )
+      .digest("hex");
+    const stored = persistSnapshot({
+      etf,
+      asOf: source.asOf,
+      fetchedAt,
+      sourceUrl: definition.compositionSourceUrl,
+      sourceHash,
+      holdings: derivedHoldings,
+    });
+
+    const snapshot = loadSnapshot(
+      etf,
+      stored,
+      source.sourceStatus,
+      ttlHours,
+    );
+    return constituentCoverage
+      ? { ...snapshot, constituentCoverage }
+      : snapshot;
+  } catch (error) {
+    if (latest) {
+      const snapshot = loadSnapshot(etf, latest, "stale", ttlHours);
+      if (
+        definition.model === "component-market-value" &&
+        latest.rowCount < definition.componentTickers.length
+      ) {
+        return {
+          ...snapshot,
+          constituentCoverage: {
+            used: latest.rowCount,
+            total: definition.componentTickers.length,
+            missingTickers: [],
+          },
+        };
+      }
+      return snapshot;
+    }
+    throw new HoldingsUnavailableError(etf.ticker, etf.id, error);
+  }
+}
+
 async function refreshHoldings(
   ticker: string,
 ): Promise<HoldingsSnapshot> {
   ensureLocalDatabase();
 
-  const etf = findEtfByTicker(ticker);
+  const etf = findEtfByReference(ticker);
   if (!etf) {
     throw new Error(`Unsupported ETF: ${ticker}`);
   }
   if (etf.fundType === "portfolio") {
     return buildPortfolioEtfSnapshot(etf);
   }
+  if (etf.fundType === "custom") {
+    const latest = findLatestSnapshot(etf.id);
+    if (!latest) {
+      throw new Error(`Frozen holdings for ${etf.ticker} are missing.`);
+    }
+    return loadSnapshot(
+      etf,
+      latest,
+      "cached",
+      cacheTtlSeconds() / 3600,
+    );
+  }
+  if (etf.derivedHoldings) {
+    return buildDerivedEtfSnapshot(etf);
+  }
 
   const ttlSeconds = cacheTtlSeconds();
   const ttlHours = ttlSeconds / 3600;
   const latest = findLatestSnapshot(etf.id);
+  const latestIsPlausible = latest
+    ? isPlausibleIsharesHoldingsCount(etf.id, latest.rowCount)
+    : false;
 
-  if (latest && isFresh(latest.fetchedAt, ttlSeconds)) {
+  if (latest && latestIsPlausible && isFresh(latest.fetchedAt, ttlSeconds)) {
     return loadSnapshot(etf, latest, "cached", ttlHours);
   }
 
   try {
-    const { raw, sourceUrl } = await fetchIsharesHoldingsFile(etf, ttlSeconds);
-    const parsed = parseIsharesHoldingsCsv(raw);
+    let fetched = await fetchIsharesHoldingsFile(
+      etf,
+      ttlSeconds,
+      Boolean(latest && !latestIsPlausible),
+    );
+    let parsed = parseIsharesHoldingsCsv(fetched.raw);
+    try {
+      assertPlausibleIsharesHoldingsCount(etf, parsed.holdings.length);
+    } catch (error) {
+      if (latest && !latestIsPlausible) throw error;
+      fetched = await fetchIsharesHoldingsFile(etf, ttlSeconds, true);
+      parsed = parseIsharesHoldingsCsv(fetched.raw);
+      assertPlausibleIsharesHoldingsCount(etf, parsed.holdings.length);
+    }
     const fetchedAt = new Date().toISOString();
     const stored = persistSnapshot({
       etf,
       asOf: parsed.asOf,
       fetchedAt,
-      sourceUrl,
-      sourceHash: createHash("sha256").update(raw).digest("hex"),
+      sourceUrl: fetched.sourceUrl,
+      sourceHash: createHash("sha256").update(fetched.raw).digest("hex"),
       holdings: parsed.holdings,
     });
 
     return loadSnapshot(etf, stored, "live", ttlHours);
   } catch (error) {
-    if (latest) {
+    if (latest && latestIsPlausible) {
       return loadSnapshot(etf, latest, "stale", ttlHours);
     }
-    throw new HoldingsUnavailableError(etf.ticker, error);
+    throw new HoldingsUnavailableError(etf.ticker, etf.id, error);
   }
 }
 
 export async function getHoldingsSnapshot(
-  ticker: string,
+  reference: string,
 ): Promise<HoldingsSnapshot> {
-  const normalizedTicker = ticker.toUpperCase();
-  const existing = inFlightRefreshes.get(normalizedTicker);
+  const normalizedReference = reference.trim();
+  const cacheKey =
+    findEtfByReference(normalizedReference)?.id ??
+    normalizedReference.toUpperCase();
+  const existing = inFlightRefreshes.get(cacheKey);
   if (existing) return existing;
 
-  const refresh = refreshHoldings(normalizedTicker).finally(() => {
-    inFlightRefreshes.delete(normalizedTicker);
+  const refresh = refreshHoldings(normalizedReference).finally(() => {
+    inFlightRefreshes.delete(cacheKey);
   });
-  inFlightRefreshes.set(normalizedTicker, refresh);
+  inFlightRefreshes.set(cacheKey, refresh);
   return refresh;
 }

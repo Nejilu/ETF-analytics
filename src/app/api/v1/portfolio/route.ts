@@ -2,13 +2,17 @@ import {
   getPortfolio,
   savePortfolio,
 } from "@/data/services/portfolio-service";
-import type { PortfolioAssetKind } from "@/domain/portfolio";
+import type {
+  PortfolioAssetKind,
+  PortfolioInputMode,
+} from "@/domain/portfolio";
 
 interface PortfolioRequestItem {
   id: string;
   kind: PortfolioAssetKind;
   referenceId: string;
-  allocationWeight: number;
+  inputMode: PortfolioInputMode;
+  inputAmount: number;
 }
 
 export async function GET() {

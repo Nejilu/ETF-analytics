@@ -29,6 +29,13 @@
       "when": 1785463070107,
       "tag": "0003_safe_sentry",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1785473315086,
+      "tag": "0004_sturdy_mentallo",
+      "breakpoints": true
     }
   ]
 }

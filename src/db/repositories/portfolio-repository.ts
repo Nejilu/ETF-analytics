@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 
 import type { EtfShareClass } from "@/domain/etf";
 import type { PortfolioItem } from "@/domain/portfolio";
+import { securityQuoteAlias } from "@/domain/security-equivalence";
 
 import { getDb } from "../client";
 import {
@@ -39,6 +40,13 @@ function loadPortfolio(id: string): StoredPortfolio | undefined {
       id: portfolioItems.id,
       assetType: portfolioItems.assetType,
       allocationWeight: portfolioItems.allocationWeight,
+      quantity: portfolioItems.quantity,
+      inputMode: portfolioItems.inputMode,
+      inputAmount: portfolioItems.inputAmount,
+      initialPriceUsd: portfolioItems.initialPriceUsd,
+      initialValueUsd: portfolioItems.initialValueUsd,
+      itemPriceSymbol: portfolioItems.priceSymbol,
+      itemPriceCurrency: portfolioItems.priceCurrency,
       etfId: portfolioItems.etfId,
       etfTicker: etfs.ticker,
       etfName: etfs.name,
@@ -60,6 +68,13 @@ function loadPortfolio(id: string): StoredPortfolio | undefined {
     updatedAt: portfolio.updatedAt,
     items: rows.map((row) => {
       const kind = row.assetType === "security" ? "security" : "etf";
+      const securityAlias =
+        kind === "security"
+          ? securityQuoteAlias({
+              ticker: row.securityTicker ?? "",
+              name: row.securityName ?? "",
+            })
+          : undefined;
       return {
         id: row.id,
         kind,
@@ -67,13 +82,23 @@ function loadPortfolio(id: string): StoredPortfolio | undefined {
           kind === "security" ? row.securityId ?? "" : row.etfId ?? "",
         ticker:
           kind === "security"
-            ? row.securityTicker ?? "—"
+            ? securityAlias?.displayTicker ?? row.securityTicker ?? "—"
             : row.etfTicker ?? "—",
         name:
           kind === "security"
             ? row.securityName ?? "Unknown security"
             : row.etfName ?? "Unknown ETF",
         allocationWeight: row.allocationWeight,
+        quantity: row.quantity ?? undefined,
+        inputMode:
+          row.inputMode === "shares" || row.inputMode === "value"
+            ? row.inputMode
+            : undefined,
+        inputAmount: row.inputAmount ?? undefined,
+        initialPriceUsd: row.initialPriceUsd ?? undefined,
+        initialValueUsd: row.initialValueUsd ?? undefined,
+        priceSymbol: row.itemPriceSymbol ?? undefined,
+        priceCurrency: row.itemPriceCurrency ?? undefined,
       };
     }),
   };
@@ -99,6 +124,38 @@ export function loadDefaultPortfolio(): StoredPortfolio {
 
 export function loadPortfolioById(id: string): StoredPortfolio | undefined {
   return loadPortfolio(id);
+}
+
+export function anchorPortfolioQuantities(
+  portfolioId: string,
+  items: PortfolioItem[],
+) {
+  const db = getDb();
+  db.transaction((transaction) => {
+    for (const item of items) {
+      if (!item.quantity || item.quantity <= 0) continue;
+      transaction
+        .update(portfolioItems)
+        .set({
+          allocationWeight: item.allocationWeight,
+          quantity: item.quantity,
+          inputMode: item.inputMode ?? "shares",
+          inputAmount: item.inputAmount ?? item.quantity,
+          initialPriceUsd: item.initialPriceUsd ?? item.currentPriceUsd,
+          initialValueUsd: item.initialValueUsd ?? item.currentValueUsd,
+          priceSymbol: item.priceSymbol,
+          priceCurrency: item.priceCurrency,
+          updatedAt: sql`CURRENT_TIMESTAMP`,
+        })
+        .where(
+          and(
+            eq(portfolioItems.id, item.id),
+            eq(portfolioItems.portfolioId, portfolioId),
+          ),
+        )
+        .run();
+    }
+  });
 }
 
 export function replaceDefaultPortfolioItems(items: PortfolioItem[]) {
@@ -135,6 +192,13 @@ export function replaceDefaultPortfolioItems(items: PortfolioItem[]) {
             securityId:
               item.kind === "security" ? item.referenceId : null,
             allocationWeight: item.allocationWeight,
+            quantity: item.quantity,
+            inputMode: item.inputMode,
+            inputAmount: item.inputAmount,
+            initialPriceUsd: item.initialPriceUsd,
+            initialValueUsd: item.initialValueUsd,
+            priceSymbol: item.priceSymbol,
+            priceCurrency: item.priceCurrency,
           })),
         )
         .run();
@@ -193,6 +257,13 @@ export function saveDefaultPortfolioAsEtf(
           etfId: item.kind === "etf" ? item.referenceId : null,
           securityId: item.kind === "security" ? item.referenceId : null,
           allocationWeight: item.allocationWeight,
+          quantity: item.quantity,
+          inputMode: item.inputMode,
+          inputAmount: item.inputAmount,
+          initialPriceUsd: item.initialPriceUsd,
+          initialValueUsd: item.initialValueUsd,
+          priceSymbol: item.priceSymbol,
+          priceCurrency: item.priceCurrency,
           createdAt: now,
           updatedAt: now,
         })),
@@ -216,6 +287,7 @@ export function saveDefaultPortfolioAsEtf(
         ter: 0,
         productUrl: `/portfolio/${portfolioId}`,
         holdingsUrl: `local://portfolio/${portfolioId}`,
+        priceSymbol: null,
         fundType: "portfolio",
         portfolioId,
         description: input.description,

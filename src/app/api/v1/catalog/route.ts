@@ -1,11 +1,11 @@
-import { ETF_CATALOG } from "@/data/catalog";
+import { getCatalog } from "@/data/services/catalog-service";
 
 export function GET() {
   return Response.json(
-    { data: ETF_CATALOG },
+    { data: getCatalog() },
     {
       headers: {
-        "Cache-Control": "public, max-age=3600, s-maxage=86400",
+        "Cache-Control": "no-store",
       },
     },
   );

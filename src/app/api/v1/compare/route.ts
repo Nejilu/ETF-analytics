@@ -1,8 +1,9 @@
-import { getEtfByTicker } from "@/data/catalog";
 import {
   getHoldingsSnapshot,
   HoldingsUnavailableError,
 } from "@/data/services/holdings-service";
+import { ensureLocalDatabase } from "@/db/bootstrap";
+import { findEtfByTicker } from "@/db/repositories/catalog-repository";
 import { compareHoldings } from "@/domain/processors/compare-holdings";
 
 export async function GET(request: Request) {
@@ -10,7 +11,8 @@ export async function GET(request: Request) {
   const leftTicker = url.searchParams.get("left")?.toUpperCase() ?? "";
   const rightTicker = url.searchParams.get("right")?.toUpperCase() ?? "";
 
-  if (!getEtfByTicker(leftTicker) || !getEtfByTicker(rightTicker)) {
+  ensureLocalDatabase();
+  if (!findEtfByTicker(leftTicker) || !findEtfByTicker(rightTicker)) {
     return Response.json(
       {
         error:
@@ -60,7 +62,10 @@ export async function GET(request: Request) {
     {
       headers: {
         "Cache-Control":
-          "public, max-age=300, s-maxage=86400, stale-while-revalidate=3600",
+          left.sourceStatus === "stale" ||
+          right.sourceStatus === "stale"
+            ? "no-store"
+            : "public, max-age=300, s-maxage=86400, stale-while-revalidate=3600",
       },
     },
   );

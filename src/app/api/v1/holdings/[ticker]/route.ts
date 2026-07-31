@@ -1,25 +1,30 @@
-import { getEtfByTicker } from "@/data/catalog";
 import {
   getHoldingsSnapshot,
   HoldingsUnavailableError,
 } from "@/data/services/holdings-service";
+import { ensureLocalDatabase } from "@/db/bootstrap";
+import { findEtfByTicker } from "@/db/repositories/catalog-repository";
 
 export async function GET(
   _request: Request,
   context: { params: Promise<{ ticker: string }> },
 ) {
   const { ticker } = await context.params;
-  if (!getEtfByTicker(ticker)) {
+  ensureLocalDatabase();
+  if (!findEtfByTicker(ticker)) {
     return Response.json({ error: "Unsupported ETF." }, { status: 404 });
   }
 
   try {
+    const snapshot = await getHoldingsSnapshot(ticker);
     return Response.json(
-      { data: await getHoldingsSnapshot(ticker) },
+      { data: snapshot },
       {
         headers: {
           "Cache-Control":
-            "public, max-age=300, s-maxage=86400, stale-while-revalidate=3600",
+            snapshot.sourceStatus === "stale"
+              ? "no-store"
+              : "public, max-age=300, s-maxage=86400, stale-while-revalidate=3600",
         },
       },
     );

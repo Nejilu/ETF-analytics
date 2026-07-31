@@ -94,7 +94,7 @@ export function parseIsharesHoldingsCsv(raw: string): ParsedHoldingsFile {
   const isinIndex = findColumn(headers, ["ISIN"]);
   const currencyIndex = findColumn(headers, ["Currency", "Market Currency"]);
 
-  const holdings = rows
+  const parsedHoldings = rows
     .slice(headerIndex + 1)
     .map((row): Holding | null => {
       const name = valueAt(row, nameIndex);
@@ -118,6 +118,22 @@ export function parseIsharesHoldingsCsv(raw: string): ParsedHoldingsFile {
       };
     })
     .filter((holding): holding is Holding => holding !== null);
+
+  const holdingsBySecurity = new Map<string, Holding>();
+  for (const holding of parsedHoldings) {
+    const existing = holdingsBySecurity.get(holding.securityId);
+    if (!existing) {
+      holdingsBySecurity.set(holding.securityId, holding);
+      continue;
+    }
+
+    existing.weight += holding.weight;
+    if (holding.marketValue !== undefined) {
+      existing.marketValue =
+        (existing.marketValue ?? 0) + holding.marketValue;
+    }
+  }
+  const holdings = [...holdingsBySecurity.values()];
 
   if (holdings.length < 5) {
     throw new Error("The iShares file does not contain enough holdings.");

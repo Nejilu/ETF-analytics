@@ -16,6 +16,7 @@ export const benchmarks = sqliteTable(
     name: text("name").notNull(),
     provider: text("provider").notNull(),
     region: text("region"),
+    description: text("description"),
     methodologyUrl: text("methodology_url"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -40,6 +41,11 @@ export const etfs = sqliteTable(
     tradingCurrency: text("trading_currency").notNull(),
     distributionPolicy: text("distribution_policy").notNull(),
     ter: real("ter"),
+    productUrl: text("product_url").notNull(),
+    holdingsUrl: text("holdings_url").notNull(),
+    fundType: text("fund_type").notNull().default("physical"),
+    portfolioId: text("portfolio_id"),
+    description: text("description"),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     metadataJson: text("metadata_json", { mode: "json" }),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -105,7 +111,7 @@ export const holdings = sqliteTable(
   {
     snapshotId: text("snapshot_id")
       .notNull()
-      .references(() => holdingSnapshots.id),
+      .references(() => holdingSnapshots.id, { onDelete: "cascade" }),
     securityId: text("security_id")
       .notNull()
       .references(() => securities.id),
@@ -120,6 +126,38 @@ export const holdings = sqliteTable(
   (table) => [
     primaryKey({ columns: [table.snapshotId, table.securityId] }),
     index("holdings_security_idx").on(table.securityId),
+  ],
+);
+
+export const portfolios = sqliteTable("portfolios", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  baseCurrency: text("base_currency").notNull().default("USD"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const portfolioItems = sqliteTable(
+  "portfolio_items",
+  {
+    id: text("id").primaryKey(),
+    portfolioId: text("portfolio_id")
+      .notNull()
+      .references(() => portfolios.id, { onDelete: "cascade" }),
+    assetType: text("asset_type").notNull(),
+    etfId: text("etf_id").references(() => etfs.id),
+    securityId: text("security_id").references(() => securities.id),
+    allocationWeight: real("allocation_weight").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("portfolio_items_portfolio_idx").on(table.portfolioId),
+    uniqueIndex("portfolio_items_etf_uq").on(table.portfolioId, table.etfId),
+    uniqueIndex("portfolio_items_security_uq").on(
+      table.portfolioId,
+      table.securityId,
+    ),
   ],
 );
 

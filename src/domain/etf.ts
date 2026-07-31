@@ -1,6 +1,10 @@
-export type FundWrapper = "UCITS" | "US_1940_ACT";
-export type DistributionPolicy = "Accumulating" | "Distributing";
-export type DataStatus = "live";
+export type FundWrapper = "UCITS" | "US_1940_ACT" | "SYNTHETIC";
+export type DistributionPolicy =
+  | "Accumulating"
+  | "Distributing"
+  | "Look-through";
+export type EtfFundType = "physical" | "portfolio";
+export type DataStatus = "live" | "cached" | "stale";
 
 export interface Benchmark {
   id: string;
@@ -24,6 +28,9 @@ export interface EtfShareClass {
   ter: number;
   productUrl: string;
   holdingsUrl: string;
+  fundType?: EtfFundType;
+  portfolioId?: string;
+  description?: string;
 }
 
 export interface CatalogGroup extends Benchmark {
@@ -65,6 +72,24 @@ export interface SleevePosition {
   rightActiveWeight: number;
 }
 
+export interface ImplicitSleevePosition {
+  securityId: string;
+  ticker: string;
+  name: string;
+  sector: string;
+  activeWeight: number;
+  normalizedWeight: number;
+}
+
+export interface ImplicitSleeve {
+  sourceTicker: string;
+  relativeToTicker: string;
+  sourceActiveWeight: number;
+  positionsCount: number;
+  top10Concentration: number;
+  positions: ImplicitSleevePosition[];
+}
+
 export interface SectorComparison {
   sector: string;
   left: number;
@@ -94,5 +119,9 @@ export interface ComparisonResult {
   rightActiveWeight: number;
   sharedPositionsCount: number;
   positions: SleevePosition[];
+  implicitSleeves: {
+    left: ImplicitSleeve;
+    right: ImplicitSleeve;
+  };
   sectorComparison: SectorComparison[];
 }

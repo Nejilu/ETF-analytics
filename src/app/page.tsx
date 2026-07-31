@@ -1,6 +1,6 @@
 import { ComparisonWorkbench } from "@/components/dashboard/comparison-workbench";
-import { ETF_CATALOG } from "@/data/catalog";
+import { getCatalog } from "@/data/services/catalog-service";
 
 export default function HomePage() {
-  return <ComparisonWorkbench catalog={ETF_CATALOG} />;
+  return <ComparisonWorkbench catalog={getCatalog()} />;
 }

@@ -14,10 +14,12 @@ import {
   YAxis,
 } from "recharts";
 
+import { PortfolioAnalytics } from "@/components/dashboard/portfolio-analytics";
 import type {
   CatalogGroup,
   ComparisonResult,
   EtfShareClass,
+  ImplicitSleeve,
   SleevePosition,
 } from "@/domain/etf";
 
@@ -44,6 +46,7 @@ function formatDate(value: string) {
 }
 
 function wrapperLabel(etf: EtfShareClass) {
+  if (etf.wrapper === "SYNTHETIC") return "Portfolio ETF";
   return etf.wrapper === "UCITS" ? "UCITS" : "US";
 }
 
@@ -131,9 +134,16 @@ function FundSelector({
         <div className="ticker-tile">{etf.ticker}</div>
         <div>
           <strong>{etf.name}</strong>
-          <p>
-            {etf.domicile} · {etf.distributionPolicy} · TER{" "}
-            {formatPercent(etf.ter, 2)}
+          <p
+            className={etf.fundType === "portfolio" ? "fund-description" : ""}
+            title={
+              etf.fundType === "portfolio" ? etf.description : undefined
+            }
+          >
+            {etf.fundType === "portfolio"
+              ? etf.description ??
+                `${etf.domicile} · dynamic look-through composition`
+              : `${etf.domicile} · ${etf.distributionPolicy} · TER ${formatPercent(etf.ter, 2)}`}
           </p>
         </div>
       </div>
@@ -309,6 +319,131 @@ function SectorChart({ comparison }: { comparison: ComparisonResult }) {
         />
       </BarChart>
     </ResponsiveContainer>
+  );
+}
+
+const IMPLICIT_SLEEVE_RANK_LIMIT = 10;
+
+function ImplicitSleeveRanking({
+  sleeve,
+  side,
+  sharedMaxWeight,
+}: {
+  sleeve: ImplicitSleeve;
+  side: SelectionSide;
+  sharedMaxWeight: number;
+}) {
+  const rankedPositions = sleeve.positions.slice(0, IMPLICIT_SLEEVE_RANK_LIMIT);
+  const otherWeight = Math.max(0, 100 - sleeve.top10Concentration);
+
+  return (
+    <article className={`implicit-sleeve implicit-sleeve--${side}`}>
+      <header className="implicit-sleeve__header">
+        <div>
+          <span className="implicit-sleeve__label">
+            {side === "left" ? "ETF A" : "ETF B"} · implicit ETF
+          </span>
+          <h3>
+            {sleeve.sourceTicker} <span>vs {sleeve.relativeToTicker}</span>
+          </h3>
+        </div>
+        <strong>100%</strong>
+      </header>
+
+      <div className="implicit-sleeve__stats">
+        <span>
+          <b>{sleeve.positionsCount}</b>
+          active holdings
+        </span>
+        <span>
+          <b>{formatPercent(sleeve.top10Concentration)}</b>
+          top 10
+        </span>
+        <span>
+          <b>{formatPercent(sleeve.sourceActiveWeight)}</b>
+          source weight
+        </span>
+      </div>
+
+      {rankedPositions.length > 0 ? (
+        <ol className="implicit-ranking">
+          {rankedPositions.map((position, index) => (
+            <li key={position.securityId}>
+              <span className="implicit-ranking__rank">{index + 1}</span>
+              <div className="implicit-ranking__security">
+                <div>
+                  <strong>{position.ticker}</strong>
+                  <span>{position.name}</span>
+                </div>
+                <b>{formatPercent(position.normalizedWeight, 2)}</b>
+                <div className="implicit-ranking__track" aria-hidden="true">
+                  <span
+                    style={{
+                      width: `${sharedMaxWeight > 0 ? (position.normalizedWeight / sharedMaxWeight) * 100 : 0}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <div className="implicit-sleeve__empty">
+          No relative overweight remains after removing the shared portfolio.
+        </div>
+      )}
+
+      <footer className="implicit-sleeve__footer">
+        <span>Other active holdings</span>
+        <strong>{formatPercent(otherWeight, 2)}</strong>
+      </footer>
+    </article>
+  );
+}
+
+function ImplicitSleevesPanel({
+  comparison,
+}: {
+  comparison: ComparisonResult;
+}) {
+  const leftSleeve = comparison.implicitSleeves.left;
+  const rightSleeve = comparison.implicitSleeves.right;
+  const sharedMaxWeight = Math.max(
+    leftSleeve.positions[0]?.normalizedWeight ?? 0,
+    rightSleeve.positions[0]?.normalizedWeight ?? 0,
+  );
+
+  return (
+    <section className="panel implicit-sleeves-panel">
+      <div className="panel-heading implicit-sleeves-heading">
+        <div>
+          <span className="eyebrow">Relative portfolio construction</span>
+          <h2>Implicit active-sleeve ETFs</h2>
+        </div>
+        <span className="info-chip">Normalised to 100% · shared scale</span>
+      </div>
+      <p className="implicit-sleeves-intro">
+        Each side contains only that ETF&apos;s relative overweights, rescaled
+        to 100%. Choosing {comparison.left.etf.ticker} over{" "}
+        {comparison.right.etf.ticker} is equivalent to going long the left
+        implicit ETF and short the right one at the active-sleeve weight.
+      </p>
+      <div className="implicit-sleeves-grid">
+        <ImplicitSleeveRanking
+          sleeve={leftSleeve}
+          side="left"
+          sharedMaxWeight={sharedMaxWeight}
+        />
+        <ImplicitSleeveRanking
+          sleeve={rightSleeve}
+          side="right"
+          sharedMaxWeight={sharedMaxWeight}
+        />
+      </div>
+      <div className="implicit-sleeves-formula">
+        Normalised weight = security active weight ÷ total active sleeve × 100
+      </div>
+    </section>
   );
 }
 
@@ -507,6 +642,10 @@ function DataUnavailableState({
 export function ComparisonWorkbench({
   catalog,
 }: ComparisonWorkbenchProps) {
+  const [availableCatalog, setAvailableCatalog] = useState(catalog);
+  const [workspaceView, setWorkspaceView] = useState<"compare" | "portfolio">(
+    "compare",
+  );
   const [leftBenchmark, setLeftBenchmark] = useState("sp-500");
   const [rightBenchmark, setRightBenchmark] = useState("msci-world");
   const [leftTicker, setLeftTicker] = useState("IVV");
@@ -517,7 +656,7 @@ export function ComparisonWorkbench({
   const [unavailable, setUnavailable] = useState<string[]>([]);
 
   const onBenchmarkChange = (side: SelectionSide, benchmarkId: string) => {
-    const benchmark = catalog.find((item) => item.id === benchmarkId);
+    const benchmark = availableCatalog.find((item) => item.id === benchmarkId);
     if (!benchmark) return;
     const preferred =
       side === "right"
@@ -530,6 +669,18 @@ export function ComparisonWorkbench({
       setRightBenchmark(benchmarkId);
       setRightTicker((preferred ?? benchmark.variants[0]).ticker);
     }
+  };
+
+  const refreshCatalog = async () => {
+    const response = await fetch("/api/v1/catalog", { cache: "no-store" });
+    const payload = (await response.json()) as {
+      data?: CatalogGroup[];
+      error?: string;
+    };
+    if (!response.ok || !payload.data) {
+      throw new Error(payload.error ?? "The ETF catalog could not be refreshed.");
+    }
+    setAvailableCatalog(payload.data);
   };
 
   const compare = async () => {
@@ -580,15 +731,33 @@ export function ComparisonWorkbench({
         </div>
         <ThemeToggle mobile />
         <nav className="main-nav" aria-label="Primary navigation">
-          <a className="nav-item nav-item--active" href="#comparison">
+          <button
+            className={`nav-item${workspaceView === "compare" ? " nav-item--active" : ""}`}
+            type="button"
+            aria-pressed={workspaceView === "compare"}
+            onClick={() => setWorkspaceView("compare")}
+          >
             <span className="nav-icon">↔</span>
             Compare
-          </a>
-          <a className="nav-item" href="#positions">
+          </button>
+          <button
+            className={`nav-item${workspaceView === "portfolio" ? " nav-item--active" : ""}`}
+            type="button"
+            aria-pressed={workspaceView === "portfolio"}
+            onClick={() => setWorkspaceView("portfolio")}
+          >
+            <span className="nav-icon">Σ</span>
+            Portfolio
+          </button>
+          <a
+            className="nav-item"
+            href="#positions"
+            onClick={() => setWorkspaceView("compare")}
+          >
             <span className="nav-icon">◎</span>
             Holdings
           </a>
-          <span className="nav-caption">Planned modules</span>
+          <span className="nav-caption">Research modules</span>
           <button className="nav-item nav-item--disabled" type="button">
             <span className="nav-icon">⌁</span>
             Exposures
@@ -603,7 +772,7 @@ export function ComparisonWorkbench({
         <div className="sidebar-card">
           <span className="live-pulse" />
           <strong>iShares sources</strong>
-          <p>Official holdings cached for 24 hours.</p>
+          <p>Official holdings persisted locally and refreshed every 24 hours.</p>
         </div>
         <div className="sidebar-footer">
           <span>JL</span>
@@ -617,24 +786,61 @@ export function ComparisonWorkbench({
       <main className="main-content">
         <header className="topbar">
           <div className="breadcrumb">
-            Analysis <span>/</span> ETF comparison
+            Analysis <span>/</span>{" "}
+            {workspaceView === "compare"
+              ? "ETF comparison"
+              : "Portfolio analytics"}
           </div>
           <div className="topbar-actions">
-            <span className={`source-badge ${error ? "source-badge--error" : comparison ? "" : "source-badge--idle"}`}>
+            <span
+              className={`source-badge ${
+                workspaceView === "portfolio"
+                  ? ""
+                  : error
+                    ? "source-badge--error"
+                    : comparison
+                      ? ""
+                      : "source-badge--idle"
+              }`}
+            >
               <i />
-              {error ? "Unavailable" : comparison ? "Live data" : "Not loaded"}
+              {workspaceView === "portfolio"
+                ? "Local portfolio"
+                : error
+                  ? "Unavailable"
+                  : comparison
+                    ? "Live data"
+                    : "Not loaded"}
             </span>
             <ThemeToggle />
           </div>
         </header>
 
         <div className="workspace">
+          <div className="mobile-workspace-switch" aria-label="Analysis module">
+            <button
+              type="button"
+              className={workspaceView === "compare" ? "is-active" : ""}
+              onClick={() => setWorkspaceView("compare")}
+            >
+              ETF comparison
+            </button>
+            <button
+              type="button"
+              className={workspaceView === "portfolio" ? "is-active" : ""}
+              onClick={() => setWorkspaceView("portfolio")}
+            >
+              Portfolio
+            </button>
+          </div>
+          {workspaceView === "compare" ? (
+            <>
           <section className="comparison-builder" id="comparison">
             <FundSelector
               side="left"
               benchmarkId={leftBenchmark}
               ticker={leftTicker}
-              catalog={catalog}
+              catalog={availableCatalog}
               onBenchmarkChange={onBenchmarkChange}
               onTickerChange={(_, value) => setLeftTicker(value)}
             />
@@ -643,7 +849,7 @@ export function ComparisonWorkbench({
               side="right"
               benchmarkId={rightBenchmark}
               ticker={rightTicker}
-              catalog={catalog}
+              catalog={availableCatalog}
               onBenchmarkChange={onBenchmarkChange}
               onTickerChange={(_, value) => setRightTicker(value)}
             />
@@ -739,6 +945,7 @@ export function ComparisonWorkbench({
               </section>
 
               <div id="positions">
+                <ImplicitSleevesPanel comparison={comparison} />
                 <PositionTable comparison={comparison} />
               </div>
             </>
@@ -748,6 +955,13 @@ export function ComparisonWorkbench({
               rightTicker={rightTicker}
               hasError={Boolean(error)}
               unavailable={unavailable}
+            />
+          )}
+            </>
+          ) : (
+            <PortfolioAnalytics
+              catalog={availableCatalog}
+              onCatalogChanged={refreshCatalog}
             />
           )}
 

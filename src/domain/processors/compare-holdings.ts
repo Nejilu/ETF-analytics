@@ -2,12 +2,15 @@ import type {
   ComparisonResult,
   Holding,
   HoldingsSnapshot,
+  ImplicitSleeve,
   SectorComparison,
   SleevePosition,
 } from "@/domain/etf";
 
 const round = (value: number, decimals = 2) =>
   Number(value.toFixed(decimals));
+
+const roundPositionWeight = (value: number) => round(value, 6);
 
 function normalize(holdings: Holding[]): Holding[] {
   const total = holdings.reduce((sum, holding) => sum + holding.weight, 0);
@@ -54,6 +57,71 @@ function buildSectorComparison(
     .sort((a, b) => Math.max(b.left, b.right) - Math.max(a.left, a.right));
 }
 
+function buildImplicitSleeve(
+  positions: SleevePosition[],
+  side: "left" | "right",
+  sourceTicker: string,
+  relativeToTicker: string,
+  sourceActiveWeight: number,
+): ImplicitSleeve {
+  const activeWeightKey =
+    side === "left" ? "leftActiveWeight" : "rightActiveWeight";
+  const activePositions = positions.filter(
+    (position) => position[activeWeightKey] > 0,
+  );
+  const normalizationBase = activePositions.reduce(
+    (sum, position) => sum + position[activeWeightKey],
+    0,
+  );
+  const normalizedPositions =
+    normalizationBase > 0
+      ? activePositions
+          .map((position) => ({
+            securityId: position.securityId,
+            ticker: position.ticker,
+            name: position.name,
+            sector: position.sector,
+            activeWeight: roundPositionWeight(position[activeWeightKey]),
+            normalizedWeight: roundPositionWeight(
+              (position[activeWeightKey] / normalizationBase) * 100,
+            ),
+          }))
+          .sort((a, b) => b.normalizedWeight - a.normalizedWeight)
+      : [];
+  const roundedTotal = roundPositionWeight(
+    normalizedPositions.reduce(
+      (sum, position) => sum + position.normalizedWeight,
+      0,
+    ),
+  );
+  const roundingAdjustment = roundPositionWeight(100 - roundedTotal);
+
+  if (normalizedPositions.length > 0 && roundingAdjustment !== 0) {
+    normalizedPositions[0] = {
+      ...normalizedPositions[0],
+      normalizedWeight: roundPositionWeight(
+        normalizedPositions[0].normalizedWeight + roundingAdjustment,
+      ),
+    };
+    normalizedPositions.sort(
+      (a, b) => b.normalizedWeight - a.normalizedWeight,
+    );
+  }
+
+  return {
+    sourceTicker,
+    relativeToTicker,
+    sourceActiveWeight,
+    positionsCount: normalizedPositions.length,
+    top10Concentration: round(
+      normalizedPositions
+        .slice(0, 10)
+        .reduce((sum, position) => sum + position.normalizedWeight, 0),
+    ),
+    positions: normalizedPositions,
+  };
+}
+
 export function compareHoldings(
   leftSnapshot: HoldingsSnapshot,
   rightSnapshot: HoldingsSnapshot,
@@ -64,7 +132,7 @@ export function compareHoldings(
   const rightMap = new Map(rightHoldings.map((holding) => [holding.securityId, holding]));
   const securityIds = new Set([...leftMap.keys(), ...rightMap.keys()]);
 
-  const positions: SleevePosition[] = [...securityIds]
+  const rawPositions = [...securityIds]
     .map((securityId) => {
       const left = leftMap.get(securityId);
       const right = rightMap.get(securityId);
@@ -76,11 +144,11 @@ export function compareHoldings(
         ticker: left?.ticker ?? right?.ticker ?? "—",
         name: left?.name ?? right?.name ?? "Unknown security",
         sector: left?.sector ?? right?.sector ?? "Unclassified",
-        leftWeight: round(leftWeight),
-        overlapWeight: round(overlapWeight),
-        rightWeight: round(rightWeight),
-        leftActiveWeight: round(Math.max(leftWeight - rightWeight, 0)),
-        rightActiveWeight: round(Math.max(rightWeight - leftWeight, 0)),
+        leftWeight,
+        overlapWeight,
+        rightWeight,
+        leftActiveWeight: Math.max(leftWeight - rightWeight, 0),
+        rightActiveWeight: Math.max(rightWeight - leftWeight, 0),
       };
     })
     .sort(
@@ -90,7 +158,30 @@ export function compareHoldings(
     );
 
   const overlapWeight = round(
-    positions.reduce((sum, position) => sum + position.overlapWeight, 0),
+    rawPositions.reduce((sum, position) => sum + position.overlapWeight, 0),
+  );
+  const activeSleeveWeight = round(100 - overlapWeight);
+  const positions: SleevePosition[] = rawPositions.map((position) => ({
+    ...position,
+    leftWeight: roundPositionWeight(position.leftWeight),
+    overlapWeight: roundPositionWeight(position.overlapWeight),
+    rightWeight: roundPositionWeight(position.rightWeight),
+    leftActiveWeight: roundPositionWeight(position.leftActiveWeight),
+    rightActiveWeight: roundPositionWeight(position.rightActiveWeight),
+  }));
+  const leftImplicitSleeve = buildImplicitSleeve(
+    positions,
+    "left",
+    leftSnapshot.etf.ticker,
+    rightSnapshot.etf.ticker,
+    activeSleeveWeight,
+  );
+  const rightImplicitSleeve = buildImplicitSleeve(
+    positions,
+    "right",
+    rightSnapshot.etf.ticker,
+    leftSnapshot.etf.ticker,
+    activeSleeveWeight,
   );
 
   return {
@@ -114,11 +205,15 @@ export function compareHoldings(
       rightSnapshot.cacheTtlHours,
     ),
     overlapWeight,
-    leftActiveWeight: round(100 - overlapWeight),
-    rightActiveWeight: round(100 - overlapWeight),
+    leftActiveWeight: activeSleeveWeight,
+    rightActiveWeight: activeSleeveWeight,
     sharedPositionsCount: positions.filter((position) => position.overlapWeight > 0)
       .length,
     positions,
+    implicitSleeves: {
+      left: leftImplicitSleeve,
+      right: rightImplicitSleeve,
+    },
     sectorComparison: buildSectorComparison(leftHoldings, rightHoldings),
   };
 }

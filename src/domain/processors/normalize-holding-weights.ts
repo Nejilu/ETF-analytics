@@ -5,7 +5,10 @@ const MAX_TOTAL_DIFFERENCE = 5;
 
 // Market values are preferred only when they reconcile closely with the
 // official weights. This avoids treating derivative market value as exposure.
-function normalizedBySourceWeight(holdings: Holding[]): Holding[] {
+function normalizedBySourceWeight(
+  holdings: Holding[],
+  targetTotal: number,
+): Holding[] {
   const total = holdings.reduce(
     (sum, holding) => sum + Math.max(0, holding.weight),
     0,
@@ -14,11 +17,14 @@ function normalizedBySourceWeight(holdings: Holding[]): Holding[] {
 
   return holdings.map((holding) => ({
     ...holding,
-    weight: (Math.max(0, holding.weight) / total) * 100,
+    weight: (Math.max(0, holding.weight) / total) * targetTotal,
   }));
 }
 
-function normalizedByMarketValue(holdings: Holding[]): Holding[] | null {
+function normalizedByMarketValue(
+  holdings: Holding[],
+  targetTotal: number,
+): Holding[] | null {
   if (
     holdings.length === 0 ||
     holdings.some(
@@ -39,13 +45,17 @@ function normalizedByMarketValue(holdings: Holding[]): Holding[] | null {
 
   return holdings.map((holding) => ({
     ...holding,
-    weight: ((holding.marketValue ?? 0) / total) * 100,
+    weight: ((holding.marketValue ?? 0) / total) * targetTotal,
   }));
 }
 
-export function normalizeHoldingWeights(holdings: Holding[]): Holding[] {
-  const sourceWeights = normalizedBySourceWeight(holdings);
-  const marketValueWeights = normalizedByMarketValue(holdings);
+export function normalizeHoldingWeights(
+  holdings: Holding[],
+  exposureMultiplier = 1,
+): Holding[] {
+  const targetTotal = 100 * exposureMultiplier;
+  const sourceWeights = normalizedBySourceWeight(holdings, targetTotal);
+  const marketValueWeights = normalizedByMarketValue(holdings, targetTotal);
   if (!marketValueWeights) return sourceWeights;
 
   const sourceTotal = sourceWeights.reduce(
@@ -63,8 +73,8 @@ export function normalizeHoldingWeights(holdings: Holding[]): Holding[] {
     0,
   );
 
-  return maxDifference <= MAX_POSITION_DIFFERENCE &&
-    totalDifference <= MAX_TOTAL_DIFFERENCE
+  return maxDifference <= MAX_POSITION_DIFFERENCE * exposureMultiplier &&
+    totalDifference <= MAX_TOTAL_DIFFERENCE * exposureMultiplier
     ? marketValueWeights
     : sourceWeights;
 }

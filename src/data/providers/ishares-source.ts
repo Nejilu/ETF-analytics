@@ -8,6 +8,27 @@ interface IsharesHoldingsFile {
 const CSV_ACCEPT_HEADER = "text/csv,text/plain;q=0.9,*/*;q=0.8";
 const LEGACY_UK_DOWNLOAD_ID = "1506575576011.ajax";
 const CURRENT_CH_DOWNLOAD_ID = "1495092304805.ajax";
+const MINIMUM_EXPECTED_HOLDINGS: Record<string, number> = {
+  "acwi-us": 2_000,
+};
+
+export function isPlausibleIsharesHoldingsCount(
+  etfId: string,
+  count: number,
+): boolean {
+  return count >= (MINIMUM_EXPECTED_HOLDINGS[etfId] ?? 5);
+}
+
+export function assertPlausibleIsharesHoldingsCount(
+  etf: Pick<EtfShareClass, "id" | "ticker">,
+  count: number,
+): void {
+  if (!isPlausibleIsharesHoldingsCount(etf.id, count)) {
+    throw new Error(
+      `The ${etf.ticker} holdings download appears incomplete (${count} rows).`,
+    );
+  }
+}
 
 export function holdingsSourceCandidates(sourceUrl: string): string[] {
   const candidates = [sourceUrl];
@@ -46,6 +67,7 @@ export function assertCsvPayload(contentType: string, raw: string): void {
 export async function fetchIsharesHoldingsFile(
   etf: EtfShareClass,
   ttlSeconds: number,
+  bypassCache = false,
 ): Promise<IsharesHoldingsFile> {
   const failures: string[] = [];
 
@@ -56,10 +78,14 @@ export async function fetchIsharesHoldingsFile(
           Accept: CSV_ACCEPT_HEADER,
           "User-Agent": "IndexLens/0.1 holdings-research",
         },
-        next: {
-          revalidate: ttlSeconds,
-          tags: [`holdings:${etf.ticker}`],
-        },
+        ...(bypassCache
+          ? { cache: "no-store" as const }
+          : {
+              next: {
+                revalidate: ttlSeconds,
+                tags: [`holdings:${etf.id}`],
+              },
+            }),
         signal: AbortSignal.timeout(12_000),
       });
 

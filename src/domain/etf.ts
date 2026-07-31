@@ -3,8 +3,34 @@ export type DistributionPolicy =
   | "Accumulating"
   | "Distributing"
   | "Look-through";
-export type EtfFundType = "physical" | "portfolio";
+export type EtfFundType = "physical" | "portfolio" | "custom";
 export type DataStatus = "live" | "cached" | "stale";
+
+export interface MarketValueDerivedHoldingsDefinition {
+  model: "component-market-value";
+  sourceEtfId: string;
+  sourceIndexName: string;
+  sourceIndexIsin?: string;
+  sourceIndexCode?: string;
+  constituentsEffectiveDate: string;
+  constituentsReviewedAt: string;
+  compositionSourceUrl: string;
+  weighting: "source-market-value-normalized";
+  componentTickers: string[];
+  missingComponentPolicy?: "error" | "exclude-and-renormalize";
+}
+
+export interface ScaledSourceDerivedHoldingsDefinition {
+  model: "scaled-source";
+  sourceEtfId: string;
+  sourceIndexName: string;
+  compositionSourceUrl: string;
+  exposureMultiplier: number;
+}
+
+export type DerivedHoldingsDefinition =
+  | MarketValueDerivedHoldingsDefinition
+  | ScaledSourceDerivedHoldingsDefinition;
 
 export interface Benchmark {
   id: string;
@@ -28,9 +54,13 @@ export interface EtfShareClass {
   ter: number;
   productUrl: string;
   holdingsUrl: string;
+  priceSymbol?: string;
+  issuer?: string;
   fundType?: EtfFundType;
   portfolioId?: string;
   description?: string;
+  derivedHoldings?: DerivedHoldingsDefinition;
+  exposureMultiplier?: number;
 }
 
 export interface CatalogGroup extends Benchmark {
@@ -50,6 +80,12 @@ export interface Holding {
   currency?: string;
 }
 
+export interface ConstituentCoverage {
+  used: number;
+  total: number;
+  missingTickers: string[];
+}
+
 export interface HoldingsSnapshot {
   etf: EtfShareClass;
   asOf: string;
@@ -58,6 +94,7 @@ export interface HoldingsSnapshot {
   sourceUrl: string;
   cacheTtlHours: number;
   holdings: Holding[];
+  constituentCoverage?: ConstituentCoverage;
 }
 
 export interface SleevePosition {
@@ -104,6 +141,7 @@ export interface ComparisonResult {
     sourceStatus: DataStatus;
     holdingsCount: number;
     top10Concentration: number;
+    constituentCoverage?: ConstituentCoverage;
   };
   right: {
     etf: EtfShareClass;
@@ -111,6 +149,7 @@ export interface ComparisonResult {
     sourceStatus: DataStatus;
     holdingsCount: number;
     top10Concentration: number;
+    constituentCoverage?: ConstituentCoverage;
   };
   calculatedAt: string;
   cacheTtlHours: number;

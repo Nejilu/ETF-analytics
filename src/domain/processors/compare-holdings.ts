@@ -6,6 +6,7 @@ import type {
   SectorComparison,
   SleevePosition,
 } from "@/domain/etf";
+import { mergeEquivalentHoldings } from "@/domain/security-equivalence";
 
 import { normalizeHoldingWeights } from "./normalize-holding-weights";
 
@@ -119,8 +120,18 @@ export function compareHoldings(
   leftSnapshot: HoldingsSnapshot,
   rightSnapshot: HoldingsSnapshot,
 ): ComparisonResult {
-  const leftHoldings = normalizeHoldingWeights(leftSnapshot.holdings);
-  const rightHoldings = normalizeHoldingWeights(rightSnapshot.holdings);
+  const leftHoldings = mergeEquivalentHoldings(
+    normalizeHoldingWeights(
+      leftSnapshot.holdings,
+      leftSnapshot.etf.exposureMultiplier ?? 1,
+    ),
+  );
+  const rightHoldings = mergeEquivalentHoldings(
+    normalizeHoldingWeights(
+      rightSnapshot.holdings,
+      rightSnapshot.etf.exposureMultiplier ?? 1,
+    ),
+  );
   const leftMap = new Map(leftHoldings.map((holding) => [holding.securityId, holding]));
   const rightMap = new Map(rightHoldings.map((holding) => [holding.securityId, holding]));
   const securityIds = new Set([...leftMap.keys(), ...rightMap.keys()]);
@@ -154,22 +165,38 @@ export function compareHoldings(
     (sum, position) => sum + position.overlapWeight,
     0,
   );
-  const rawActiveSleeveWeight = Math.max(0, 100 - rawOverlapWeight);
+  const leftTotalWeight = leftHoldings.reduce(
+    (sum, holding) => sum + holding.weight,
+    0,
+  );
+  const rightTotalWeight = rightHoldings.reduce(
+    (sum, holding) => sum + holding.weight,
+    0,
+  );
+  const rawLeftActiveWeight = Math.max(
+    0,
+    leftTotalWeight - rawOverlapWeight,
+  );
+  const rawRightActiveWeight = Math.max(
+    0,
+    rightTotalWeight - rawOverlapWeight,
+  );
   const overlapWeight = round(rawOverlapWeight);
-  const activeSleeveWeight = round(rawActiveSleeveWeight);
+  const leftActiveWeight = round(rawLeftActiveWeight);
+  const rightActiveWeight = round(rawRightActiveWeight);
   const leftImplicitSleeve = buildImplicitSleeve(
     rawPositions,
     "left",
     leftSnapshot.etf.ticker,
     rightSnapshot.etf.ticker,
-    rawActiveSleeveWeight,
+    rawLeftActiveWeight,
   );
   const rightImplicitSleeve = buildImplicitSleeve(
     rawPositions,
     "right",
     rightSnapshot.etf.ticker,
     leftSnapshot.etf.ticker,
-    rawActiveSleeveWeight,
+    rawRightActiveWeight,
   );
   const positions: SleevePosition[] = rawPositions.map((position) => ({
     ...position,
@@ -185,15 +212,17 @@ export function compareHoldings(
       etf: leftSnapshot.etf,
       asOf: leftSnapshot.asOf,
       sourceStatus: leftSnapshot.sourceStatus,
-      holdingsCount: leftSnapshot.holdings.length,
+      holdingsCount: leftHoldings.length,
       top10Concentration: topConcentration(leftHoldings, 10),
+      constituentCoverage: leftSnapshot.constituentCoverage,
     },
     right: {
       etf: rightSnapshot.etf,
       asOf: rightSnapshot.asOf,
       sourceStatus: rightSnapshot.sourceStatus,
-      holdingsCount: rightSnapshot.holdings.length,
+      holdingsCount: rightHoldings.length,
       top10Concentration: topConcentration(rightHoldings, 10),
+      constituentCoverage: rightSnapshot.constituentCoverage,
     },
     calculatedAt: new Date().toISOString(),
     cacheTtlHours: Math.min(
@@ -201,8 +230,8 @@ export function compareHoldings(
       rightSnapshot.cacheTtlHours,
     ),
     overlapWeight,
-    leftActiveWeight: activeSleeveWeight,
-    rightActiveWeight: activeSleeveWeight,
+    leftActiveWeight,
+    rightActiveWeight,
     sharedPositionsCount: positions.filter((position) => position.overlapWeight > 0)
       .length,
     positions,

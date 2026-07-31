@@ -16,6 +16,8 @@ const tables = [
   "holdings",
   "portfolios",
   "portfolio_items",
+  "market_prices",
+  "fx_rates",
   "metric_definitions",
   "metric_observations",
 ] as const;

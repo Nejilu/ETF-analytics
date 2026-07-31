@@ -3,16 +3,19 @@ import {
   HoldingsUnavailableError,
 } from "@/data/services/holdings-service";
 import { ensureLocalDatabase } from "@/db/bootstrap";
-import { findEtfByTicker } from "@/db/repositories/catalog-repository";
+import { findEtfByReference } from "@/db/repositories/catalog-repository";
 import { compareHoldings } from "@/domain/processors/compare-holdings";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const leftTicker = url.searchParams.get("left")?.toUpperCase() ?? "";
-  const rightTicker = url.searchParams.get("right")?.toUpperCase() ?? "";
+  const leftReference = url.searchParams.get("left")?.trim() ?? "";
+  const rightReference = url.searchParams.get("right")?.trim() ?? "";
 
   ensureLocalDatabase();
-  if (!findEtfByTicker(leftTicker) || !findEtfByTicker(rightTicker)) {
+  if (
+    !findEtfByReference(leftReference) ||
+    !findEtfByReference(rightReference)
+  ) {
     return Response.json(
       {
         error:
@@ -23,14 +26,14 @@ export async function GET(request: Request) {
   }
 
   const snapshots = await Promise.allSettled([
-    getHoldingsSnapshot(leftTicker),
-    getHoldingsSnapshot(rightTicker),
+    getHoldingsSnapshot(leftReference),
+    getHoldingsSnapshot(rightReference),
   ]);
 
   const unavailable = snapshots.flatMap((result) =>
     result.status === "rejected" &&
     result.reason instanceof HoldingsUnavailableError
-      ? [result.reason.ticker]
+      ? [result.reason.reference]
       : [],
   );
 
@@ -40,7 +43,7 @@ export async function GET(request: Request) {
         error:
           unavailable.length > 0
             ? `Data unavailable for ${unavailable.join(" and ")}. No substitute figures are shown.`
-            : "iShares data is temporarily unavailable.",
+            : "Source data is temporarily unavailable.",
         unavailable,
       },
       {

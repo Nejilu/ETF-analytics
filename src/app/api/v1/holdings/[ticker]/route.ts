@@ -3,7 +3,7 @@ import {
   HoldingsUnavailableError,
 } from "@/data/services/holdings-service";
 import { ensureLocalDatabase } from "@/db/bootstrap";
-import { findEtfByTicker } from "@/db/repositories/catalog-repository";
+import { findEtfByReference } from "@/db/repositories/catalog-repository";
 
 export async function GET(
   _request: Request,
@@ -11,7 +11,7 @@ export async function GET(
 ) {
   const { ticker } = await context.params;
   ensureLocalDatabase();
-  if (!findEtfByTicker(ticker)) {
+  if (!findEtfByReference(ticker)) {
     return Response.json({ error: "Unsupported ETF." }, { status: 404 });
   }
 
@@ -33,7 +33,7 @@ export async function GET(
       return Response.json(
         {
           error: `${error.message} No substitute figures are shown.`,
-          unavailable: [error.ticker],
+          unavailable: [error.reference],
         },
         { status: 503, headers: { "Cache-Control": "no-store" } },
       );

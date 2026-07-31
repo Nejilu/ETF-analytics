@@ -5,6 +5,7 @@ import type {
   PortfolioLookThroughPosition,
   PortfolioSecurity,
 } from "../portfolio";
+import { economicSecurityIdentity } from "../security-equivalence";
 import { normalizeHoldingWeights } from "./normalize-holding-weights";
 
 const EPSILON = 0.000001;
@@ -21,7 +22,8 @@ function addPosition(
 ) {
   if (!Number.isFinite(weight) || weight <= 0) return;
 
-  const existing = positions.get(security.securityId);
+  const identity = economicSecurityIdentity(security);
+  const existing = positions.get(identity.securityId);
   if (existing) {
     existing.weight += weight;
     const source = existing.contributions.find(
@@ -35,8 +37,9 @@ function addPosition(
     return;
   }
 
-  positions.set(security.securityId, {
+  positions.set(identity.securityId, {
     ...security,
+    ...identity,
     weight,
     contributions: [contribution],
   });
@@ -78,11 +81,15 @@ export function analyzePortfolio({
       continue;
     }
 
-    const snapshot = etfSnapshots.get(item.ticker);
+    const snapshot =
+      etfSnapshots.get(item.referenceId) ?? etfSnapshots.get(item.ticker);
     if (!snapshot) {
       throw new Error(`Holdings for ${item.ticker} are unavailable.`);
     }
-    const calculationHoldings = normalizeHoldingWeights(snapshot.holdings);
+    const calculationHoldings = normalizeHoldingWeights(
+      snapshot.holdings,
+      snapshot.etf.exposureMultiplier ?? 1,
+    );
     const sourceTotal = calculationHoldings.reduce(
       (sum, holding) => sum + holding.weight,
       0,
@@ -92,7 +99,7 @@ export function analyzePortfolio({
     }
 
     for (const holding of calculationHoldings) {
-      const weight = item.allocationWeight * (holding.weight / sourceTotal);
+      const weight = item.allocationWeight * (holding.weight / 100);
       addPosition(
         positions,
         {
@@ -153,9 +160,11 @@ export function analyzePortfolio({
       .map(([sector, weight]) => ({ sector, weight: roundWeight(weight) }))
       .sort((left, right) => right.weight - left.weight),
     sources: [...etfSnapshots.values()].map((snapshot) => ({
+      referenceId: snapshot.etf.id ?? snapshot.etf.ticker,
       ticker: snapshot.etf.ticker,
       asOf: snapshot.asOf,
       sourceStatus: snapshot.sourceStatus,
+      constituentCoverage: snapshot.constituentCoverage,
     })),
   };
 }

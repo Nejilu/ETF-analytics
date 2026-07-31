@@ -1,6 +1,8 @@
 import type { HoldingsSnapshot } from "./etf";
 
 export type PortfolioAssetKind = "etf" | "security";
+export type PortfolioInputMode = "value" | "shares";
+export type PriceStatus = "live" | "cached" | "stale";
 
 export interface PortfolioItem {
   id: string;
@@ -9,6 +11,18 @@ export interface PortfolioItem {
   ticker: string;
   name: string;
   allocationWeight: number;
+  quantity?: number;
+  inputMode?: PortfolioInputMode;
+  inputAmount?: number;
+  initialPriceUsd?: number;
+  initialValueUsd?: number;
+  priceSymbol?: string;
+  priceCurrency?: string;
+  currentPrice?: number;
+  currentPriceUsd?: number;
+  currentValueUsd?: number;
+  priceAsOf?: string;
+  priceStatus?: PriceStatus;
 }
 
 export interface PortfolioSecurity {
@@ -18,6 +32,29 @@ export interface PortfolioSecurity {
   sector: string;
   assetClass: string;
   country: string;
+  isin?: string;
+}
+
+export interface MarketPrice {
+  assetKind: PortfolioAssetKind;
+  assetId: string;
+  providerSymbol: string;
+  price: number;
+  currency: string;
+  fxToUsd: number;
+  priceUsd: number;
+  asOf: string;
+  fetchedAt: string;
+  sourceStatus: PriceStatus;
+}
+
+export interface FxRate {
+  currency: string;
+  providerSymbol: string;
+  rateToUsd: number;
+  asOf: string;
+  fetchedAt: string;
+  sourceStatus: PriceStatus;
 }
 
 export interface PortfolioContribution {
@@ -38,9 +75,11 @@ export interface PortfolioSectorExposure {
 }
 
 export interface PortfolioSource {
+  referenceId: string;
   ticker: string;
   asOf: string;
   sourceStatus: HoldingsSnapshot["sourceStatus"];
+  constituentCoverage?: HoldingsSnapshot["constituentCoverage"];
 }
 
 export interface PortfolioAnalysis {
@@ -51,6 +90,7 @@ export interface PortfolioAnalysis {
   directPositionsCount: number;
   etfSleevesCount: number;
   top10Concentration: number;
+  totalMarketValueUsd?: number;
   positions: PortfolioLookThroughPosition[];
   sectors: PortfolioSectorExposure[];
   sources: PortfolioSource[];
@@ -64,6 +104,7 @@ export interface PortfolioRecord {
   items: PortfolioItem[];
   analysis: PortfolioAnalysis | null;
   analysisError?: string;
+  priceError?: string;
 }
 
 export interface PortfolioAnalysisInput {

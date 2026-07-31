@@ -15,13 +15,16 @@ import {
 } from "recharts";
 
 import { PortfolioAnalytics } from "@/components/dashboard/portfolio-analytics";
+import { EtfCreator } from "@/components/dashboard/etf-creator";
 import type {
   CatalogGroup,
   ComparisonResult,
+  ConstituentCoverage,
   EtfShareClass,
   ImplicitSleeve,
   SleevePosition,
 } from "@/domain/etf";
+import { EtfSearch } from "./etf-search";
 
 interface ComparisonWorkbenchProps {
   catalog: CatalogGroup[];
@@ -46,8 +49,31 @@ function formatDate(value: string) {
 }
 
 function wrapperLabel(etf: EtfShareClass) {
-  if (etf.wrapper === "SYNTHETIC") return "Portfolio ETF";
+  if (etf.fundType === "portfolio") return "Portfolio ETF";
+  if (etf.fundType === "custom") return "Custom ACWI ETF";
+  if (etf.wrapper === "SYNTHETIC") return "Synthetic UCITS";
   return etf.wrapper === "UCITS" ? "UCITS" : "US";
+}
+
+function comparisonFundLabel(
+  comparison: ComparisonResult,
+  side: SelectionSide,
+) {
+  const etf = comparison[side].etf;
+  const peer = comparison[side === "left" ? "right" : "left"].etf;
+  return etf.ticker === peer.ticker
+    ? `${etf.ticker} · ${wrapperLabel(etf)}`
+    : etf.ticker;
+}
+
+function normalizationMessage(
+  ticker: string,
+  coverage: ConstituentCoverage,
+) {
+  const missing = coverage.missingTickers.length
+    ? ` Missing from the current ACWI snapshot: ${coverage.missingTickers.join(", ")}.`
+    : "";
+  return `${ticker}: normalization used ${coverage.used} of ${coverage.total} configured constituents.${missing}`;
 }
 
 function ThemeToggle({ mobile = false }: { mobile?: boolean }) {
@@ -75,24 +101,17 @@ function ThemeToggle({ mobile = false }: { mobile?: boolean }) {
 
 function FundSelector({
   side,
-  benchmarkId,
-  ticker,
+  etfId,
   catalog,
-  onBenchmarkChange,
-  onTickerChange,
+  onEtfChange,
 }: {
   side: SelectionSide;
-  benchmarkId: string;
-  ticker: string;
+  etfId: string;
   catalog: CatalogGroup[];
-  onBenchmarkChange: (side: SelectionSide, value: string) => void;
-  onTickerChange: (side: SelectionSide, value: string) => void;
+  onEtfChange: (side: SelectionSide, value: string) => void;
 }) {
-  const benchmark =
-    catalog.find((item) => item.id === benchmarkId) ?? catalog[0];
-  const etf =
-    benchmark.variants.find((variant) => variant.ticker === ticker) ??
-    benchmark.variants[0];
+  const etfs = catalog.flatMap((benchmark) => benchmark.variants);
+  const etf = etfs.find((variant) => variant.id === etfId) ?? etfs[0];
 
   return (
     <section className={`fund-selector fund-selector--${side}`}>
@@ -100,50 +119,28 @@ function FundSelector({
         <span className="fund-dot" aria-hidden="true" />
         ETF {side === "left" ? "A" : "B"}
       </div>
-      <div className="field-grid">
-        <label className="field">
-          <span>Underlying index</span>
-          <select
-            aria-label={`Underlying index for ETF ${side === "left" ? "A" : "B"}`}
-            value={benchmarkId}
-            onChange={(event) => onBenchmarkChange(side, event.target.value)}
-          >
-            {catalog.map((item) => (
-              <option value={item.id} key={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Share class / wrapper</span>
-          <select
-            aria-label={`Share class for ETF ${side === "left" ? "A" : "B"}`}
-            value={ticker}
-            onChange={(event) => onTickerChange(side, event.target.value)}
-          >
-            {benchmark.variants.map((variant) => (
-              <option value={variant.ticker} key={variant.id}>
-                {variant.ticker} · {wrapperLabel(variant)}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      <EtfSearch
+        catalog={catalog}
+        selectedId={etf.id}
+        label={`Search ETF ${side === "left" ? "A" : "B"}`}
+        onSelect={(value) => onEtfChange(side, value)}
+      />
       <div className="fund-identity">
         <div className="ticker-tile">{etf.ticker}</div>
         <div>
           <strong>{etf.name}</strong>
           <p
-            className={etf.fundType === "portfolio" ? "fund-description" : ""}
-            title={
-              etf.fundType === "portfolio" ? etf.description : undefined
+            className={
+              etf.description || etf.fundType === "portfolio"
+                ? "fund-description"
+                : ""
             }
+            title={etf.description}
           >
-            {etf.fundType === "portfolio"
-              ? etf.description ??
-                `${etf.domicile} · dynamic look-through composition`
-              : `${etf.domicile} · ${etf.distributionPolicy} · TER ${formatPercent(etf.ter, 2)}`}
+            {etf.description ??
+              (etf.fundType === "portfolio"
+                ? `${etf.domicile} · dynamic look-through composition`
+                : `${etf.domicile} · ${etf.distributionPolicy} · TER ${formatPercent(etf.ter, 2)}`)}
           </p>
         </div>
       </div>
@@ -214,11 +211,13 @@ function OverlapDonut({ comparison }: { comparison: ComparisonResult }) {
 }
 
 function SleeveBars({ comparison }: { comparison: ComparisonResult }) {
+  const leftLabel = comparisonFundLabel(comparison, "left");
+  const rightLabel = comparisonFundLabel(comparison, "right");
   return (
     <div className="sleeve-bars">
       <div className="sleeve-row">
         <div className="sleeve-row__header">
-          <strong>{comparison.left.etf.ticker}</strong>
+          <strong>{leftLabel}</strong>
           <span>{formatPercent(comparison.leftActiveWeight)} active</span>
         </div>
         <div className="sleeve-track">
@@ -234,7 +233,7 @@ function SleeveBars({ comparison }: { comparison: ComparisonResult }) {
       </div>
       <div className="sleeve-row">
         <div className="sleeve-row__header">
-          <strong>{comparison.right.etf.ticker}</strong>
+          <strong>{rightLabel}</strong>
           <span>{formatPercent(comparison.rightActiveWeight)} active</span>
         </div>
         <div className="sleeve-track">
@@ -249,9 +248,9 @@ function SleeveBars({ comparison }: { comparison: ComparisonResult }) {
         </div>
       </div>
       <div className="legend">
-        <span><i className="legend-dot legend-dot--left" />Active {comparison.left.etf.ticker}</span>
+        <span><i className="legend-dot legend-dot--left" />Active {leftLabel}</span>
         <span><i className="legend-dot legend-dot--overlap" />Overlap</span>
-        <span><i className="legend-dot legend-dot--right" />Active {comparison.right.etf.ticker}</span>
+        <span><i className="legend-dot legend-dot--right" />Active {rightLabel}</span>
       </div>
     </div>
   );
@@ -305,14 +304,14 @@ function SectorChart({ comparison }: { comparison: ComparisonResult }) {
         />
         <Bar
           dataKey="left"
-          name={comparison.left.etf.ticker}
+          name={comparisonFundLabel(comparison, "left")}
           fill={COLORS.left}
           radius={[0, 4, 4, 0]}
           barSize={7}
         />
         <Bar
           dataKey="right"
-          name={comparison.right.etf.ticker}
+          name={comparisonFundLabel(comparison, "right")}
           fill={COLORS.right}
           radius={[0, 4, 4, 0]}
           barSize={7}
@@ -328,10 +327,14 @@ function ImplicitSleeveRanking({
   sleeve,
   side,
   sharedMaxWeight,
+  sourceLabel,
+  relativeLabel,
 }: {
   sleeve: ImplicitSleeve;
   side: SelectionSide;
   sharedMaxWeight: number;
+  sourceLabel: string;
+  relativeLabel: string;
 }) {
   const rankedPositions = sleeve.positions.slice(0, IMPLICIT_SLEEVE_RANK_LIMIT);
   const otherWeight = Math.max(0, 100 - sleeve.top10Concentration);
@@ -344,7 +347,7 @@ function ImplicitSleeveRanking({
             {side === "left" ? "ETF A" : "ETF B"} · implicit ETF
           </span>
           <h3>
-            {sleeve.sourceTicker} <span>vs {sleeve.relativeToTicker}</span>
+            {sourceLabel} <span>vs {relativeLabel}</span>
           </h3>
         </div>
         <strong>100%</strong>
@@ -408,6 +411,8 @@ function ImplicitSleevesPanel({
 }) {
   const leftSleeve = comparison.implicitSleeves.left;
   const rightSleeve = comparison.implicitSleeves.right;
+  const leftLabel = comparisonFundLabel(comparison, "left");
+  const rightLabel = comparisonFundLabel(comparison, "right");
   const sharedMaxWeight = Math.max(
     leftSleeve.positions[0]?.normalizedWeight ?? 0,
     rightSleeve.positions[0]?.normalizedWeight ?? 0,
@@ -424,8 +429,8 @@ function ImplicitSleevesPanel({
       </div>
       <p className="implicit-sleeves-intro">
         Each side contains only that ETF&apos;s relative overweights, rescaled
-        to 100%. Choosing {comparison.left.etf.ticker} over{" "}
-        {comparison.right.etf.ticker} is equivalent to going long the left
+        to 100%. Choosing {leftLabel} over{" "}
+        {rightLabel} is equivalent to going long the left
         implicit ETF and short the right one at the active-sleeve weight.
       </p>
       <div className="implicit-sleeves-grid">
@@ -433,11 +438,15 @@ function ImplicitSleevesPanel({
           sleeve={leftSleeve}
           side="left"
           sharedMaxWeight={sharedMaxWeight}
+          sourceLabel={leftLabel}
+          relativeLabel={rightLabel}
         />
         <ImplicitSleeveRanking
           sleeve={rightSleeve}
           side="right"
           sharedMaxWeight={sharedMaxWeight}
+          sourceLabel={rightLabel}
+          relativeLabel={leftLabel}
         />
       </div>
       <div className="implicit-sleeves-formula">
@@ -453,10 +462,12 @@ function PositionTable({ comparison }: { comparison: ComparisonResult }) {
     useState<SelectionSide>("left");
   const activeWeightField =
     activeRankSide === "left" ? "leftActiveWeight" : "rightActiveWeight";
+  const leftLabel = comparisonFundLabel(comparison, "left");
+  const rightLabel = comparisonFundLabel(comparison, "right");
   const activeRankTicker =
     activeRankSide === "left"
-      ? comparison.left.etf.ticker
-      : comparison.right.etf.ticker;
+      ? leftLabel
+      : rightLabel;
 
   const rows = useMemo(() => {
     const filtered = comparison.positions.filter((position) =>
@@ -495,7 +506,7 @@ function PositionTable({ comparison }: { comparison: ComparisonResult }) {
                   className={activeRankSide === "left" ? "is-active" : ""}
                   onClick={() => setActiveRankSide("left")}
                 >
-                  {comparison.left.etf.ticker}
+                  {leftLabel}
                 </button>
                 <button
                   type="button"
@@ -503,7 +514,7 @@ function PositionTable({ comparison }: { comparison: ComparisonResult }) {
                   className={activeRankSide === "right" ? "is-active" : ""}
                   onClick={() => setActiveRankSide("right")}
                 >
-                  {comparison.right.etf.ticker}
+                  {rightLabel}
                 </button>
               </div>
             </div>
@@ -533,9 +544,9 @@ function PositionTable({ comparison }: { comparison: ComparisonResult }) {
           <thead>
             <tr>
               <th>Security</th>
-              <th>{comparison.left.etf.ticker}</th>
+              <th>{leftLabel}</th>
               <th>Overlap</th>
-              <th>{comparison.right.etf.ticker}</th>
+              <th>{rightLabel}</th>
               <th>Signal</th>
             </tr>
           </thead>
@@ -544,8 +555,8 @@ function PositionTable({ comparison }: { comparison: ComparisonResult }) {
               <PositionRow
                 key={position.securityId}
                 position={position}
-                leftTicker={comparison.left.etf.ticker}
-                rightTicker={comparison.right.etf.ticker}
+                leftTicker={leftLabel}
+                rightTicker={rightLabel}
               />
             ))}
           </tbody>
@@ -595,18 +606,21 @@ function PositionRow({
 }
 
 function DataUnavailableState({
-  leftTicker,
-  rightTicker,
+  leftEtf,
+  rightEtf,
   hasError,
   unavailable,
 }: {
-  leftTicker: string;
-  rightTicker: string;
+  leftEtf?: EtfShareClass;
+  rightEtf?: EtfShareClass;
   hasError: boolean;
   unavailable: string[];
 }) {
-  const isUnavailable = (ticker: string) =>
-    hasError && (unavailable.length === 0 || unavailable.includes(ticker));
+  const selections = [leftEtf, rightEtf].filter(
+    (etf): etf is EtfShareClass => Boolean(etf),
+  );
+  const isUnavailable = (etf: EtfShareClass) =>
+    hasError && (unavailable.length === 0 || unavailable.includes(etf.id));
 
   return (
     <section className={`panel no-data-panel ${hasError ? "no-data-panel--error" : ""}`}>
@@ -622,16 +636,16 @@ function DataUnavailableState({
         </h2>
         <p>
           {hasError
-            ? "The comparison remains empty until the required iShares files are available."
-            : "IndexLens fetches data directly from iShares and caches each response for 24 hours."}
+            ? "The comparison remains empty until the required source data is available."
+            : "IndexLens loads official provider and index data, then caches each response for 24 hours."}
         </p>
       </div>
       <div className="availability-grid">
-        {[leftTicker, rightTicker].map((ticker) => (
-          <div className="availability-card" key={ticker}>
-            <strong>{ticker}</strong>
+        {selections.map((etf) => (
+          <div className="availability-card" key={etf.id}>
+            <strong>{etf.ticker} · {wrapperLabel(etf)}</strong>
             <span>Holdings count</span>
-            <b>{isUnavailable(ticker) ? "Unavailable" : "Not loaded"}</b>
+            <b>{isUnavailable(etf) ? "Unavailable" : "Not loaded"}</b>
           </div>
         ))}
       </div>
@@ -643,33 +657,21 @@ export function ComparisonWorkbench({
   catalog,
 }: ComparisonWorkbenchProps) {
   const [availableCatalog, setAvailableCatalog] = useState(catalog);
-  const [workspaceView, setWorkspaceView] = useState<"compare" | "portfolio">(
-    "compare",
-  );
-  const [leftBenchmark, setLeftBenchmark] = useState("sp-500");
-  const [rightBenchmark, setRightBenchmark] = useState("msci-world");
-  const [leftTicker, setLeftTicker] = useState("IVV");
-  const [rightTicker, setRightTicker] = useState("SWDA");
+  const [workspaceView, setWorkspaceView] = useState<
+    "compare" | "portfolio" | "creator"
+  >("compare");
+  const [leftEtfId, setLeftEtfId] = useState("ivv-us");
+  const [rightEtfId, setRightEtfId] = useState("acwi-us");
   const [comparison, setComparison] = useState<ComparisonResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState<string[]>([]);
-
-  const onBenchmarkChange = (side: SelectionSide, benchmarkId: string) => {
-    const benchmark = availableCatalog.find((item) => item.id === benchmarkId);
-    if (!benchmark) return;
-    const preferred =
-      side === "right"
-        ? benchmark.variants.find((variant) => variant.wrapper === "UCITS")
-        : benchmark.variants.find((variant) => variant.wrapper !== "UCITS");
-    if (side === "left") {
-      setLeftBenchmark(benchmarkId);
-      setLeftTicker((preferred ?? benchmark.variants[0]).ticker);
-    } else {
-      setRightBenchmark(benchmarkId);
-      setRightTicker((preferred ?? benchmark.variants[0]).ticker);
-    }
-  };
+  const availableEtfs = useMemo(
+    () => availableCatalog.flatMap((group) => group.variants),
+    [availableCatalog],
+  );
+  const leftEtf = availableEtfs.find((etf) => etf.id === leftEtfId);
+  const rightEtf = availableEtfs.find((etf) => etf.id === rightEtfId);
 
   const refreshCatalog = async () => {
     const response = await fetch("/api/v1/catalog", { cache: "no-store" });
@@ -690,7 +692,7 @@ export function ComparisonWorkbench({
     setComparison(null);
     try {
       const response = await fetch(
-        `/api/v1/compare?left=${encodeURIComponent(leftTicker)}&right=${encodeURIComponent(rightTicker)}`,
+        `/api/v1/compare?left=${encodeURIComponent(leftEtfId)}&right=${encodeURIComponent(rightEtfId)}`,
       );
       const payload = (await response.json()) as {
         data?: ComparisonResult;
@@ -707,7 +709,7 @@ export function ComparisonWorkbench({
       }
       setComparison(payload.data);
     } catch (requestError) {
-      setUnavailable([leftTicker, rightTicker]);
+      setUnavailable([leftEtfId, rightEtfId]);
       setError(
         requestError instanceof Error
           ? requestError.message
@@ -749,6 +751,15 @@ export function ComparisonWorkbench({
             <span className="nav-icon">Σ</span>
             Portfolio
           </button>
+          <button
+            className={`nav-item${workspaceView === "creator" ? " nav-item--active" : ""}`}
+            type="button"
+            aria-pressed={workspaceView === "creator"}
+            onClick={() => setWorkspaceView("creator")}
+          >
+            <span className="nav-icon">+</span>
+            ETF Creator
+          </button>
           <a
             className="nav-item"
             href="#positions"
@@ -771,7 +782,7 @@ export function ComparisonWorkbench({
         </nav>
         <div className="sidebar-card">
           <span className="live-pulse" />
-          <strong>iShares sources</strong>
+          <strong>Official sources</strong>
           <p>Official holdings persisted locally and refreshed every 24 hours.</p>
         </div>
         <div className="sidebar-footer">
@@ -789,12 +800,14 @@ export function ComparisonWorkbench({
             Analysis <span>/</span>{" "}
             {workspaceView === "compare"
               ? "ETF comparison"
-              : "Portfolio analytics"}
+              : workspaceView === "portfolio"
+                ? "Portfolio analytics"
+                : "ETF Creator"}
           </div>
           <div className="topbar-actions">
             <span
               className={`source-badge ${
-                workspaceView === "portfolio"
+                workspaceView === "portfolio" || workspaceView === "creator"
                   ? ""
                   : error
                     ? "source-badge--error"
@@ -806,6 +819,8 @@ export function ComparisonWorkbench({
               <i />
               {workspaceView === "portfolio"
                 ? "Local portfolio"
+                : workspaceView === "creator"
+                  ? "ACWI universe"
                 : error
                   ? "Unavailable"
                   : comparison
@@ -832,26 +847,29 @@ export function ComparisonWorkbench({
             >
               Portfolio
             </button>
+            <button
+              type="button"
+              className={workspaceView === "creator" ? "is-active" : ""}
+              onClick={() => setWorkspaceView("creator")}
+            >
+              ETF Creator
+            </button>
           </div>
           {workspaceView === "compare" ? (
             <>
           <section className="comparison-builder" id="comparison">
             <FundSelector
               side="left"
-              benchmarkId={leftBenchmark}
-              ticker={leftTicker}
+              etfId={leftEtfId}
               catalog={availableCatalog}
-              onBenchmarkChange={onBenchmarkChange}
-              onTickerChange={(_, value) => setLeftTicker(value)}
+              onEtfChange={(_, value) => setLeftEtfId(value)}
             />
             <div className="versus" aria-hidden="true"><span>VS</span></div>
             <FundSelector
               side="right"
-              benchmarkId={rightBenchmark}
-              ticker={rightTicker}
+              etfId={rightEtfId}
               catalog={availableCatalog}
-              onBenchmarkChange={onBenchmarkChange}
-              onTickerChange={(_, value) => setRightTicker(value)}
+              onEtfChange={(_, value) => setRightEtfId(value)}
             />
             <div className="builder-action">
               <button
@@ -865,13 +883,24 @@ export function ComparisonWorkbench({
               </button>
               <small>
                 {comparison
-                  ? `${comparison.left.etf.ticker} as of ${formatDate(comparison.left.asOf)} · ${comparison.right.etf.ticker} as of ${formatDate(comparison.right.asOf)} · ${comparison.cacheTtlHours}h cache`
-                  : "Direct load from official iShares files · 24h cache"}
+                  ? `${comparisonFundLabel(comparison, "left")} as of ${formatDate(comparison.left.asOf)} · ${comparisonFundLabel(comparison, "right")} as of ${formatDate(comparison.right.asOf)} · ${comparison.cacheTtlHours}h cache`
+                  : "Official provider/index sources · 24h cache"}
               </small>
             </div>
           </section>
 
           {error && <div className="alert alert--error">{error}</div>}
+          {comparison &&
+            ([comparison.left, comparison.right] as const).map((side) =>
+              side.constituentCoverage ? (
+                <div className="alert" key={side.etf.id}>
+                  {normalizationMessage(
+                    side.etf.ticker,
+                    side.constituentCoverage,
+                  )}
+                </div>
+              ) : null,
+            )}
           {comparison ? (
             <>
               <section className="metric-grid" aria-label="Comparison metrics">
@@ -882,13 +911,13 @@ export function ComparisonWorkbench({
                   tone="positive"
                 />
                 <MetricCard
-                  label={`${comparison.left.etf.ticker} active sleeve`}
+                  label={`${comparisonFundLabel(comparison, "left")} active sleeve`}
                   value={formatPercent(comparison.leftActiveWeight)}
                   detail={`Top 10 = ${formatPercent(comparison.left.top10Concentration)}`}
                   tone="left"
                 />
                 <MetricCard
-                  label={`${comparison.right.etf.ticker} active sleeve`}
+                  label={`${comparisonFundLabel(comparison, "right")} active sleeve`}
                   value={formatPercent(comparison.rightActiveWeight)}
                   detail={`Top 10 = ${formatPercent(comparison.right.top10Concentration)}`}
                   tone="right"
@@ -936,8 +965,8 @@ export function ComparisonWorkbench({
                       <h2>Sector comparison</h2>
                     </div>
                     <div className="mini-legend">
-                      <span><i style={{ background: COLORS.left }} />{comparison.left.etf.ticker}</span>
-                      <span><i style={{ background: COLORS.right }} />{comparison.right.etf.ticker}</span>
+                      <span><i style={{ background: COLORS.left }} />{comparisonFundLabel(comparison, "left")}</span>
+                      <span><i style={{ background: COLORS.right }} />{comparisonFundLabel(comparison, "right")}</span>
                     </div>
                   </div>
                   <SectorChart comparison={comparison} />
@@ -951,15 +980,20 @@ export function ComparisonWorkbench({
             </>
           ) : (
             <DataUnavailableState
-              leftTicker={leftTicker}
-              rightTicker={rightTicker}
+              leftEtf={leftEtf}
+              rightEtf={rightEtf}
               hasError={Boolean(error)}
               unavailable={unavailable}
             />
           )}
             </>
-          ) : (
+          ) : workspaceView === "portfolio" ? (
             <PortfolioAnalytics
+              catalog={availableCatalog}
+              onCatalogChanged={refreshCatalog}
+            />
+          ) : (
+            <EtfCreator
               catalog={availableCatalog}
               onCatalogChanged={refreshCatalog}
             />
@@ -967,7 +1001,7 @@ export function ComparisonWorkbench({
 
           <footer className="disclaimer">
             <span>IndexLens</span>
-            Indicative data sourced from iShares when available. Holdings may
+            Indicative data sourced from fund and index providers. Holdings may
             change without notice. This is not investment advice.
           </footer>
         </div>

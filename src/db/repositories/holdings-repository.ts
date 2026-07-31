@@ -90,7 +90,7 @@ export function loadSnapshot(
       weight: row.weight,
       marketValue: row.marketValue ?? undefined,
       currency: row.currency ?? row.securityCurrency ?? undefined,
-    })),
+    })).sort((left, right) => right.weight - left.weight),
   };
 }
 

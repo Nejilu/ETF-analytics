@@ -1,4 +1,5 @@
-import { savePortfolioAsEtf } from "@/data/services/portfolio-service";
+import { createEtfFromAcwi } from "@/data/services/etf-creator-service";
+import type { EtfCreatorCriteria } from "@/domain/etf-creator";
 
 export async function POST(request: Request) {
   try {
@@ -6,18 +7,27 @@ export async function POST(request: Request) {
       ticker?: string;
       name?: string;
       description?: string;
+      selectedSecurityIds?: string[];
+      criteria?: EtfCreatorCriteria;
     };
-    if (typeof payload.ticker !== "string" || typeof payload.name !== "string") {
+    if (
+      typeof payload.ticker !== "string" ||
+      typeof payload.name !== "string" ||
+      !Array.isArray(payload.selectedSecurityIds) ||
+      !payload.criteria
+    ) {
       return Response.json(
-        { error: "Ticker and ETF name are required." },
+        { error: "Ticker, ETF name, criteria and holdings are required." },
         { status: 400 },
       );
     }
 
-    const etf = await savePortfolioAsEtf({
+    const etf = await createEtfFromAcwi({
       ticker: payload.ticker,
       name: payload.name,
       description: payload.description,
+      selectedSecurityIds: payload.selectedSecurityIds,
+      criteria: payload.criteria,
     });
     return Response.json(
       { data: etf },
@@ -29,7 +39,7 @@ export async function POST(request: Request) {
         error:
           error instanceof Error
             ? error.message
-            : "The portfolio ETF could not be saved.",
+            : "The custom ETF could not be saved.",
       },
       { status: 400, headers: { "Cache-Control": "no-store" } },
     );

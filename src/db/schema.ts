@@ -43,6 +43,7 @@ export const etfs = sqliteTable(
     ter: real("ter"),
     productUrl: text("product_url").notNull(),
     holdingsUrl: text("holdings_url").notNull(),
+    priceSymbol: text("price_symbol"),
     fundType: text("fund_type").notNull().default("physical"),
     portfolioId: text("portfolio_id"),
     description: text("description"),
@@ -148,6 +149,13 @@ export const portfolioItems = sqliteTable(
     etfId: text("etf_id").references(() => etfs.id),
     securityId: text("security_id").references(() => securities.id),
     allocationWeight: real("allocation_weight").notNull(),
+    quantity: real("quantity"),
+    inputMode: text("input_mode"),
+    inputAmount: real("input_amount"),
+    initialPriceUsd: real("initial_price_usd"),
+    initialValueUsd: real("initial_value_usd"),
+    priceSymbol: text("price_symbol"),
+    priceCurrency: text("price_currency"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
@@ -160,6 +168,36 @@ export const portfolioItems = sqliteTable(
     ),
   ],
 );
+
+export const marketPrices = sqliteTable(
+  "market_prices",
+  {
+    id: text("id").primaryKey(),
+    assetType: text("asset_type").notNull(),
+    assetId: text("asset_id").notNull(),
+    providerSymbol: text("provider_symbol").notNull(),
+    price: real("price").notNull(),
+    currency: text("currency").notNull(),
+    fxToUsd: real("fx_to_usd").notNull(),
+    priceUsd: real("price_usd").notNull(),
+    asOf: text("as_of").notNull(),
+    fetchedAt: text("fetched_at").notNull(),
+    source: text("source").notNull(),
+  },
+  (table) => [
+    uniqueIndex("market_prices_asset_uq").on(table.assetType, table.assetId),
+    index("market_prices_symbol_idx").on(table.providerSymbol),
+  ],
+);
+
+export const fxRates = sqliteTable("fx_rates", {
+  currency: text("currency").primaryKey(),
+  providerSymbol: text("provider_symbol").notNull(),
+  rateToUsd: real("rate_to_usd").notNull(),
+  asOf: text("as_of").notNull(),
+  fetchedAt: text("fetched_at").notNull(),
+  source: text("source").notNull(),
+});
 
 export const metricDefinitions = sqliteTable(
   "metric_definitions",

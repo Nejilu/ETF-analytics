@@ -4,10 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { CatalogGroup, EtfShareClass } from "@/domain/etf";
 import type {
+  MarketPrice,
   PortfolioAssetKind,
+  PortfolioInputMode,
   PortfolioItem,
   PortfolioRecord,
 } from "@/domain/portfolio";
+import { EtfSearch } from "./etf-search";
 
 interface PortfolioAnalyticsProps {
   catalog: CatalogGroup[];
@@ -20,10 +23,27 @@ interface SecuritySearchResult {
   name: string;
   sector: string;
   country: string;
+  quoteSymbol?: string;
+  instrumentType?: "ADR" | "GDR";
+  underlyingTicker?: string;
 }
 
 function formatPercent(value: number, digits = 2) {
   return `${value.toFixed(digits)}%`;
+}
+
+function formatUsd(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function formatQuantity(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 6,
+  }).format(value);
 }
 
 function createItemId() {
@@ -41,7 +61,8 @@ export function PortfolioAnalytics({
         .map((benchmark) => ({
           ...benchmark,
           variants: benchmark.variants.filter(
-            (etf) => etf.fundType !== "portfolio",
+            (etf) =>
+              etf.fundType !== "portfolio" && etf.fundType !== "custom",
           ),
         }))
         .filter((benchmark) => benchmark.variants.length > 0),
@@ -59,7 +80,11 @@ export function PortfolioAnalytics({
   const [searchResults, setSearchResults] = useState<SecuritySearchResult[]>([]);
   const [selectedSecurity, setSelectedSecurity] =
     useState<SecuritySearchResult | null>(null);
-  const [allocation, setAllocation] = useState("10");
+  const [inputMode, setInputMode] = useState<PortfolioInputMode>("value");
+  const [inputAmount, setInputAmount] = useState("1000");
+  const [quote, setQuote] = useState<MarketPrice | null>(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
   const [resultFilter, setResultFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
@@ -148,34 +173,104 @@ export function PortfolioAnalytics({
     };
   }, [kind, query, selectedSecurity]);
 
-  const draftWeight = items.reduce(
-    (sum, item) => sum + (Number.isFinite(item.allocationWeight) ? item.allocationWeight : 0),
+  const selectedReferenceId =
+    kind === "etf" ? selectedEtfId : selectedSecurity?.securityId;
+
+  useEffect(() => {
+    if (!selectedReferenceId) return;
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      if (!controller.signal.aborted) {
+        setQuoteLoading(true);
+        setQuoteError(null);
+      }
+    });
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/v1/prices/quote?kind=${kind}&referenceId=${encodeURIComponent(selectedReferenceId)}`,
+          { cache: "no-store", signal: controller.signal },
+        );
+        const payload = (await response.json()) as {
+          data?: MarketPrice;
+          error?: string;
+        };
+        if (!response.ok || !payload.data) {
+          throw new Error(payload.error ?? "The market price is unavailable.");
+        }
+        setQuote(payload.data);
+      } catch (quoteLoadError) {
+        if (!controller.signal.aborted) {
+          setQuote(null);
+          setQuoteError(
+            quoteLoadError instanceof Error
+              ? quoteLoadError.message
+              : "The market price is unavailable.",
+          );
+        }
+      } finally {
+        if (!controller.signal.aborted) setQuoteLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [kind, selectedReferenceId]);
+  const activeQuote =
+    quote?.assetKind === kind && quote.assetId === selectedReferenceId
+      ? quote
+      : null;
+  const activeQuoteLoading = Boolean(selectedReferenceId) && quoteLoading;
+
+  const draftMarketValue = items.reduce(
+    (sum, item) =>
+      sum +
+      (Number.isFinite(item.currentValueUsd)
+        ? Number(item.currentValueUsd)
+        : (item.quantity ?? 0) * (item.currentPriceUsd ?? 0)),
     0,
+  );
+  const normalizedItems = useMemo(
+    () =>
+      items.map((item) => {
+        const currentValueUsd =
+          item.currentValueUsd ??
+          (item.quantity ?? 0) * (item.currentPriceUsd ?? 0);
+        return {
+          ...item,
+          currentValueUsd,
+          allocationWeight:
+            draftMarketValue > 0 ? (currentValueUsd / draftMarketValue) * 100 : 0,
+        };
+      }),
+    [items, draftMarketValue],
   );
   const hasUnsavedChanges =
     JSON.stringify(
-      items.map(({ id, kind: itemKind, referenceId, allocationWeight }) => ({
+      normalizedItems.map(({ id, kind: itemKind, referenceId, quantity }) => ({
         id,
         kind: itemKind,
         referenceId,
-        allocationWeight,
+        quantity,
       })),
     ) !==
     JSON.stringify(
       (portfolio?.items ?? []).map(
-        ({ id, kind: itemKind, referenceId, allocationWeight }) => ({
+        ({ id, kind: itemKind, referenceId, quantity }) => ({
           id,
           kind: itemKind,
           referenceId,
-          allocationWeight,
+          quantity,
         }),
       ),
     );
 
   const addItem = () => {
-    const numericAllocation = Number(allocation);
-    if (!Number.isFinite(numericAllocation) || numericAllocation <= 0) {
-      setError("Enter an allocation greater than 0%.");
+    const numericAmount = Number(inputAmount);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      setError(
+        inputMode === "value"
+          ? "Enter a position value greater than $0."
+          : "Enter a share quantity greater than 0.",
+      );
       return;
     }
 
@@ -202,33 +297,42 @@ export function PortfolioAnalytics({
     const existing = items.find(
       (item) => item.kind === kind && item.referenceId === referenceId,
     );
-    const nextTotal = draftWeight + numericAllocation;
-    if (nextTotal > 100.000001) {
-      setError(`This line would bring the portfolio to ${formatPercent(nextTotal)}.`);
+    if (existing) {
+      setError(`${ticker} is already in the portfolio. Edit its shares below.`);
       return;
     }
+    if (!activeQuote || activeQuote.assetId !== referenceId) {
+      setError(quoteError ?? "Wait for a current market price before adding this position.");
+      return;
+    }
+    const quantity =
+      inputMode === "shares" ? numericAmount : numericAmount / activeQuote.priceUsd;
+    const currentValueUsd = quantity * activeQuote.priceUsd;
 
     setItems((current) =>
-      existing
-        ? current.map((item) =>
-            item.id === existing.id
-              ? {
-                  ...item,
-                  allocationWeight: item.allocationWeight + numericAllocation,
-                }
-              : item,
-          )
-        : [
-            ...current,
-            {
-              id: createItemId(),
-              kind,
-              referenceId,
-              ticker,
-              name,
-              allocationWeight: numericAllocation,
-            },
-          ],
+      [
+        ...current,
+        {
+          id: createItemId(),
+          kind,
+          referenceId,
+          ticker,
+          name,
+          allocationWeight: 0,
+          inputMode,
+          inputAmount: numericAmount,
+          quantity,
+          initialPriceUsd: activeQuote.priceUsd,
+          initialValueUsd: currentValueUsd,
+          priceSymbol: activeQuote.providerSymbol,
+          priceCurrency: activeQuote.currency,
+          currentPrice: activeQuote.price,
+          currentPriceUsd: activeQuote.priceUsd,
+          currentValueUsd,
+          priceAsOf: activeQuote.asOf,
+          priceStatus: activeQuote.sourceStatus,
+        },
+      ],
     );
     setError(null);
     if (kind === "security") {
@@ -239,12 +343,8 @@ export function PortfolioAnalytics({
   };
 
   const save = async () => {
-    if (draftWeight > 100.000001) {
-      setError("Portfolio allocations cannot exceed 100%.");
-      return;
-    }
-    if (items.some((item) => item.allocationWeight <= 0)) {
-      setError("Every line must have an allocation greater than 0%.");
+    if (normalizedItems.some((item) => !item.quantity || item.quantity <= 0)) {
+      setError("Every line must have a share quantity greater than 0.");
       return;
     }
 
@@ -255,11 +355,12 @@ export function PortfolioAnalytics({
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          items: items.map(({ id, kind: itemKind, referenceId, allocationWeight }) => ({
+          items: normalizedItems.map(({ id, kind: itemKind, referenceId, quantity }) => ({
             id,
             kind: itemKind,
             referenceId,
-            allocationWeight,
+            inputMode: "shares",
+            inputAmount: quantity,
           })),
         }),
       });
@@ -343,6 +444,17 @@ export function PortfolioAnalytics({
 
   const analysis = portfolio?.analysis;
   const maxPositionWeight = analysis?.positions[0]?.weight ?? 0;
+  const numericInputAmount = Number(inputAmount);
+  const previewQuantity =
+    activeQuote && numericInputAmount > 0
+      ? inputMode === "shares"
+        ? numericInputAmount
+        : numericInputAmount / activeQuote.priceUsd
+      : 0;
+  const previewValueUsd =
+    activeQuote && previewQuantity > 0
+      ? previewQuantity * activeQuote.priceUsd
+      : 0;
 
   return (
     <div className="portfolio-workspace" id="portfolio">
@@ -356,15 +468,16 @@ export function PortfolioAnalytics({
           </p>
         </div>
         <div className="portfolio-total">
-          <span>Draft allocation</span>
-          <strong className={draftWeight > 100 ? "is-over" : ""}>
-            {formatPercent(draftWeight)}
-          </strong>
-          <small>{formatPercent(Math.max(0, 100 - draftWeight))} unallocated</small>
+          <span>Current market value</span>
+          <strong>{formatUsd(draftMarketValue)}</strong>
+          <small>{items.length} priced position{items.length === 1 ? "" : "s"}</small>
         </div>
       </section>
 
       {error ? <div className="alert alert--error">{error}</div> : null}
+      {portfolio?.priceError ? (
+        <div className="alert alert--error">{portfolio.priceError}</div>
+      ) : null}
       {portfolio?.analysisError ? (
         <div className="alert alert--error">{portfolio.analysisError}</div>
       ) : null}
@@ -409,23 +522,12 @@ export function PortfolioAnalytics({
           </div>
 
           {kind === "etf" ? (
-            <label className="field portfolio-asset-field">
-              <span>ETF</span>
-              <select
-                value={selectedEtfId}
-                onChange={(event) => setSelectedEtfId(event.target.value)}
-              >
-                {sourceCatalog.map((benchmark) => (
-                  <optgroup label={benchmark.name} key={benchmark.id}>
-                    {benchmark.variants.map((etf) => (
-                      <option value={etf.id} key={etf.id}>
-                        {etf.ticker} · {etf.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            </label>
+            <EtfSearch
+              catalog={sourceCatalog}
+              selectedId={selectedEtfId}
+              label="Search supported ETFs"
+              onSelect={setSelectedEtfId}
+            />
           ) : (
             <div className="security-search">
               <label className="field">
@@ -443,7 +545,7 @@ export function PortfolioAnalytics({
                   }}
                 />
               </label>
-              {query.trim().length >= 2 ? (
+              {query.trim().length >= 2 && !selectedSecurity ? (
                 <div className="security-search-results" role="listbox">
                   {searching ? (
                     <div className="security-search-message">Searching ACWI…</div>
@@ -452,23 +554,22 @@ export function PortfolioAnalytics({
                       <button
                         type="button"
                         role="option"
-                        aria-selected={
-                          selectedSecurity?.securityId === security.securityId
-                        }
-                        className={
-                          selectedSecurity?.securityId === security.securityId
-                            ? "is-selected"
-                            : ""
-                        }
+                        aria-selected={false}
                         key={security.securityId}
                         onClick={() => {
                           setSelectedSecurity(security);
                           setQuery(`${security.ticker} · ${security.name}`);
+                          setSearchResults([]);
+                          setSearching(false);
                         }}
                       >
                         <strong>{security.ticker}</strong>
                         <span>{security.name}</span>
-                        <small>{security.sector}</small>
+                        <small>
+                          {security.instrumentType && security.quoteSymbol
+                            ? `${security.instrumentType} · Yahoo ${security.quoteSymbol} · underlying ${security.underlyingTicker}`
+                            : security.sector}
+                        </small>
                       </button>
                     ))
                   ) : (
@@ -481,24 +582,74 @@ export function PortfolioAnalytics({
             </div>
           )}
 
+          <div className="position-input-mode" aria-label="Position entry mode">
+            <button
+              type="button"
+              className={inputMode === "value" ? "is-active" : ""}
+              aria-pressed={inputMode === "value"}
+              onClick={() => setInputMode("value")}
+            >
+              Value (USD)
+            </button>
+            <button
+              type="button"
+              className={inputMode === "shares" ? "is-active" : ""}
+              aria-pressed={inputMode === "shares"}
+              onClick={() => setInputMode("shares")}
+            >
+              Shares
+            </button>
+          </div>
+
           <div className="portfolio-add-action">
             <label className="field allocation-field">
-              <span>Portfolio allocation</span>
-              <span className="percent-input">
+              <span>
+                {inputMode === "value" ? "Position value" : "Number of shares"}
+              </span>
+              <span className="position-amount-input">
+                {inputMode === "value" ? <b>$</b> : null}
                 <input
                   type="number"
-                  min="0.01"
-                  max="100"
-                  step="0.01"
-                  value={allocation}
-                  onChange={(event) => setAllocation(event.target.value)}
+                  min="0.000001"
+                  step={inputMode === "value" ? "0.01" : "0.000001"}
+                  value={inputAmount}
+                  onChange={(event) => setInputAmount(event.target.value)}
                 />
-                <b>%</b>
+                {inputMode === "shares" ? <b>shares</b> : null}
               </span>
             </label>
-            <button className="secondary-button" type="button" onClick={addItem}>
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={activeQuoteLoading || !activeQuote}
+              onClick={addItem}
+            >
               Add position
             </button>
+          </div>
+          <div className="market-quote-preview" aria-live="polite">
+            {activeQuoteLoading ? (
+              <span><span className="spinner" /> Loading market price…</span>
+            ) : activeQuote ? (
+              <>
+                <span>
+                  {activeQuote.providerSymbol}: <b>{activeQuote.price.toLocaleString("en-US")} {activeQuote.currency}</b>
+                  {" · "}{formatUsd(activeQuote.priceUsd)} per share
+                </span>
+                {previewQuantity > 0 ? (
+                  <strong>
+                    {formatQuantity(previewQuantity)} shares · {formatUsd(previewValueUsd)}
+                  </strong>
+                ) : null}
+                <small>
+                  {activeQuote.sourceStatus} price · cached for up to 24 hours
+                </small>
+              </>
+            ) : quoteError ? (
+              <span className="is-error">{quoteError}</span>
+            ) : (
+              <span>Select an instrument to load its market price.</span>
+            )}
           </div>
         </article>
 
@@ -513,7 +664,7 @@ export function PortfolioAnalytics({
 
           {items.length > 0 ? (
             <div className="portfolio-lines">
-              {items.map((item) => (
+              {normalizedItems.map((item) => (
                 <div className="portfolio-line" key={item.id}>
                   <span className={`asset-badge asset-badge--${item.kind}`}>
                     {item.kind === "etf" ? "ETF" : "Stock"}
@@ -522,27 +673,39 @@ export function PortfolioAnalytics({
                     <strong>{item.ticker}</strong>
                     <span>{item.name}</span>
                   </div>
-                  <span className="percent-input percent-input--compact">
+                  <div className="portfolio-line__valuation">
+                    <span className="shares-input">
                     <input
-                      aria-label={`${item.ticker} allocation`}
+                      aria-label={`${item.ticker} shares`}
                       type="number"
-                      min="0.01"
-                      max="100"
-                      step="0.01"
-                      value={item.allocationWeight}
+                      min="0.000001"
+                      step="0.000001"
+                      value={item.quantity ?? ""}
                       onChange={(event) => {
                         const value = Number(event.target.value);
                         setItems((current) =>
                           current.map((candidate) =>
                             candidate.id === item.id
-                              ? { ...candidate, allocationWeight: value }
+                              ? {
+                                  ...candidate,
+                                  inputMode: "shares",
+                                  inputAmount: value,
+                                  quantity: value,
+                                  currentValueUsd:
+                                    value * (candidate.currentPriceUsd ?? 0),
+                                }
                               : candidate,
                           ),
                         );
                       }}
                     />
-                    <b>%</b>
-                  </span>
+                    <b>shares</b>
+                    </span>
+                    <small>
+                      {formatUsd(item.currentValueUsd ?? 0)} ·{" "}
+                      {formatPercent(item.allocationWeight)}
+                    </small>
+                  </div>
                   <button
                     className="remove-line"
                     type="button"
@@ -575,7 +738,7 @@ export function PortfolioAnalytics({
             <button
               className="primary-button"
               type="button"
-              disabled={saving || draftWeight > 100}
+              disabled={saving || items.length === 0}
               onClick={save}
             >
               {saving ? <span className="spinner" /> : "Save & analyse"}
@@ -588,9 +751,11 @@ export function PortfolioAnalytics({
         <>
           <section className="portfolio-metrics" aria-label="Portfolio metrics">
             <article>
-              <span>Invested</span>
-              <strong>{formatPercent(analysis.allocationWeight)}</strong>
-              <small>{formatPercent(analysis.cashWeight)} cash / unallocated</small>
+              <span>Market value</span>
+              <strong>
+                {formatUsd(analysis.totalMarketValueUsd ?? draftMarketValue)}
+              </strong>
+              <small>quantity × latest cached price</small>
             </article>
             <article>
               <span>Look-through holdings</span>
@@ -616,16 +781,21 @@ export function PortfolioAnalytics({
               <span className="eyebrow">Reusable local instrument</span>
               <h2>Save this portfolio as an ETF</h2>
               <p>
-                IndexLens stores the ETF sleeves and direct-stock weights—not a
-                frozen holdings list. Its look-through composition is rebuilt
-                from the latest persisted source ETF files every time it is
-                opened or compared.
+                IndexLens stores the number of ETF and stock shares, not frozen
+                percentages or a frozen holdings list. Component weights are
+                recalculated from market prices, and ETF look-through is rebuilt
+                from the latest persisted source files whenever it is opened or
+                compared.
               </p>
               <div className="component-definition">
-                {items.map((item) => (
+                {normalizedItems.map((item) => (
                   <span key={item.id}>
-                    <b>{formatPercent(item.allocationWeight)}</b> {item.ticker}
-                    <small>{item.kind === "etf" ? "ETF sleeve" : "direct stock"}</small>
+                    <b>{formatQuantity(item.quantity ?? 0)} shares</b>{" "}
+                    {item.ticker}
+                    <small>
+                      {formatUsd(item.currentValueUsd ?? 0)} ·{" "}
+                      {formatPercent(item.allocationWeight)} now
+                    </small>
                   </span>
                 ))}
               </div>
@@ -665,9 +835,7 @@ export function PortfolioAnalytics({
                 <span>
                   {hasUnsavedChanges
                     ? "Save the latest changes first."
-                    : draftWeight !== 100
-                      ? `Allocate exactly 100% (${formatPercent(draftWeight)} now).`
-                      : "Ready for the ETF catalog."}
+                    : "Ready for the ETF catalog."}
                 </span>
                 <button
                   className="primary-button"
@@ -675,7 +843,7 @@ export function PortfolioAnalytics({
                   disabled={
                     savingEtf ||
                     hasUnsavedChanges ||
-                    Math.abs(draftWeight - 100) > 0.000001
+                    items.length === 0
                   }
                   onClick={saveAsEtf}
                 >
@@ -789,10 +957,19 @@ export function PortfolioAnalytics({
                 {analysis.sources.length > 0 ? (
                   <div className="portfolio-source-list">
                     {analysis.sources.map((source) => (
-                      <div key={source.ticker}>
+                      <div key={source.referenceId}>
                         <strong>{source.ticker}</strong>
                         <span>as of {source.asOf}</span>
                         <b>{source.sourceStatus}</b>
+                        {source.constituentCoverage ? (
+                          <small>
+                            Normalization used {source.constituentCoverage.used} of{" "}
+                            {source.constituentCoverage.total} configured constituents
+                            {source.constituentCoverage.missingTickers.length > 0
+                              ? `. Missing from the current ACWI snapshot: ${source.constituentCoverage.missingTickers.join(", ")}.`
+                              : "."}
+                          </small>
+                        ) : null}
                       </div>
                     ))}
                   </div>

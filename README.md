@@ -36,6 +36,7 @@ local `.env` file to move the database without changing application code:
 ```env
 DATABASE_PATH=.data/index-lens.sqlite
 HOLDINGS_CACHE_TTL_SECONDS=86400
+MARKET_PRICE_TTL_SECONDS=86400
 ```
 
 Relative paths resolve from the project root. The database and its WAL files
@@ -74,20 +75,30 @@ are written below `.data/backups/`.
 - Use a pure, reusable processor for weighted overlap and active sleeves.
 - Rank security-level active weights independently for either ETF.
 - Build and persist a mixed ETF/direct-stock portfolio, using ACWI holdings as
-  the searchable stock universe.
+  the searchable stock universe. Positions can be entered as a USD value or a
+  number of shares.
+- Persist Yahoo Finance market prices and FX conversions for 24 hours, with the
+  latest stored quote used as a stale fallback when a refresh fails.
 - Expand every ETF sleeve, merge duplicate direct and indirect exposures, and
   rank the resulting synthetic portfolio at security level.
-- Save a fully allocated portfolio as a reusable local ETF. Its component
-  sleeves remain relational, while its security-level holdings are recalculated
-  from the latest persisted source ETF compositions whenever it is selected.
+- Save the share-based portfolio definition as a reusable local ETF. Its
+  component weights follow current market values, while its security-level
+  holdings are recalculated from the latest persisted source ETF compositions
+  whenever it is selected.
 - Select saved portfolio ETFs in the standard holdings and ETF comparison
   workflows under the `Saved portfolios` catalog group.
+- Create a frozen, free-float-weighted ETF from the cached ACWI universe using
+  country, sector, supported-ETF overlap and manual constituent filters. Saved
+  definitions keep their constituent list and normalized weights unchanged and
+  appear under the `Custom ACWI ETFs` catalog group.
 - Use a persistent light or dark interface theme.
 - Expose versioned endpoints: `/api/v1/catalog`,
   `/api/v1/holdings/:ticker` and
-  `/api/v1/compare?left=IVV&right=SWDA`, plus `/api/v1/portfolio` and
-  `/api/v1/securities/search?q=AAPL`. Portfolio ETFs are created through
-  `/api/v1/portfolio/save-as-etf`.
+  `/api/v1/compare?left=IVV&right=ACWI`, plus `/api/v1/portfolio` and
+  `/api/v1/securities/search?q=AAPL`. Market quotes are exposed through
+  `/api/v1/prices/quote`, and portfolio ETFs are created through
+  `/api/v1/portfolio/save-as-etf`. Frozen ACWI ETFs are created through
+  `/api/v1/etf-creator`.
 - Provide versioned Drizzle migrations for the local database.
 
 ## Architecture

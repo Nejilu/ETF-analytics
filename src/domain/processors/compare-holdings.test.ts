@@ -83,3 +83,44 @@ test("normalises each implicit active sleeve to exactly 100%", () => {
   assert.equal(result.implicitSleeves.left.positions[0].ticker, "A");
   assert.equal(result.implicitSleeves.right.positions[0].ticker, "C");
 });
+
+test("uses market values to preserve differences hidden by rounded source weights", () => {
+  const result = compareHoldings(
+    snapshot("LEFT", [
+      { ...holding("A", "A", 50), marketValue: 5_000.4 },
+      { ...holding("B", "B", 50), marketValue: 4_999.6 },
+    ]),
+    snapshot("RIGHT", [
+      { ...holding("A", "A", 50), marketValue: 4_999.6 },
+      { ...holding("B", "B", 50), marketValue: 5_000.4 },
+    ]),
+  );
+
+  const leftActive = result.positions.find(
+    (position) => position.ticker === "A",
+  );
+  const rightActive = result.positions.find(
+    (position) => position.ticker === "B",
+  );
+
+  assert.equal(leftActive?.leftActiveWeight, 0.008);
+  assert.equal(rightActive?.rightActiveWeight, 0.008);
+  assert.equal(result.implicitSleeves.left.positions[0].normalizedWeight, 100);
+  assert.equal(result.implicitSleeves.right.positions[0].normalizedWeight, 100);
+});
+
+test("falls back to official weights when market values are incomplete", () => {
+  const result = compareHoldings(
+    snapshot("LEFT", [
+      { ...holding("A", "A", 60), marketValue: 1_000 },
+      holding("B", "B", 40),
+    ]),
+    snapshot("RIGHT", [
+      holding("A", "A", 60),
+      holding("B", "B", 40),
+    ]),
+  );
+
+  assert.equal(result.overlapWeight, 100);
+  assert.equal(result.leftActiveWeight, 0);
+});

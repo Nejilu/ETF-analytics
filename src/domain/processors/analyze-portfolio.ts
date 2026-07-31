@@ -5,11 +5,12 @@ import type {
   PortfolioLookThroughPosition,
   PortfolioSecurity,
 } from "../portfolio";
+import { normalizeHoldingWeights } from "./normalize-holding-weights";
 
 const EPSILON = 0.000001;
 
 function roundWeight(value: number): number {
-  return Math.round(value * 1_000_000) / 1_000_000;
+  return Math.round(value * 10_000_000_000) / 10_000_000_000;
 }
 
 function addPosition(
@@ -18,7 +19,7 @@ function addPosition(
   weight: number,
   contribution: PortfolioContribution,
 ) {
-  if (weight <= EPSILON) return;
+  if (!Number.isFinite(weight) || weight <= 0) return;
 
   const existing = positions.get(security.securityId);
   if (existing) {
@@ -81,7 +82,8 @@ export function analyzePortfolio({
     if (!snapshot) {
       throw new Error(`Holdings for ${item.ticker} are unavailable.`);
     }
-    const sourceTotal = snapshot.holdings.reduce(
+    const calculationHoldings = normalizeHoldingWeights(snapshot.holdings);
+    const sourceTotal = calculationHoldings.reduce(
       (sum, holding) => sum + holding.weight,
       0,
     );
@@ -89,7 +91,7 @@ export function analyzePortfolio({
       throw new Error(`Holdings for ${item.ticker} have no usable weight.`);
     }
 
-    for (const holding of snapshot.holdings) {
+    for (const holding of calculationHoldings) {
       const weight = item.allocationWeight * (holding.weight / sourceTotal);
       addPosition(
         positions,
@@ -112,21 +114,22 @@ export function analyzePortfolio({
     }
   }
 
-  const rankedPositions = [...positions.values()]
-    .map((position) => ({
-      ...position,
-      weight: roundWeight(position.weight),
-      contributions: position.contributions
-        .map((contribution) => ({
-          ...contribution,
-          weight: roundWeight(contribution.weight),
-        }))
-        .sort((left, right) => right.weight - left.weight),
-    }))
-    .sort((left, right) => right.weight - left.weight);
+  const rawRankedPositions = [...positions.values()].sort(
+    (left, right) => right.weight - left.weight,
+  );
+  const rankedPositions = rawRankedPositions.map((position) => ({
+    ...position,
+    weight: roundWeight(position.weight),
+    contributions: position.contributions
+      .map((contribution) => ({
+        ...contribution,
+        weight: roundWeight(contribution.weight),
+      }))
+      .sort((left, right) => right.weight - left.weight),
+  }));
 
   const sectors = new Map<string, number>();
-  for (const position of rankedPositions) {
+  for (const position of rawRankedPositions) {
     sectors.set(
       position.sector,
       (sectors.get(position.sector) ?? 0) + position.weight,
@@ -141,7 +144,7 @@ export function analyzePortfolio({
     directPositionsCount: items.filter((item) => item.kind === "security").length,
     etfSleevesCount: items.filter((item) => item.kind === "etf").length,
     top10Concentration: roundWeight(
-      rankedPositions
+      rawRankedPositions
         .slice(0, 10)
         .reduce((sum, position) => sum + position.weight, 0),
     ),

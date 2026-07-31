@@ -100,6 +100,40 @@ test("normalises small source weight drift inside each ETF sleeve", () => {
   );
 });
 
+test("uses market values for higher-precision portfolio look-through weights", () => {
+  const preciseSnapshot = {
+    ...snapshot,
+    holdings: [
+      { ...apple, weight: 50, marketValue: 5_000.4 },
+      { ...microsoft, weight: 50, marketValue: 4_999.6 },
+    ],
+  } as HoldingsSnapshot;
+
+  const result = analyzePortfolio({
+    items: [
+      {
+        id: "etf",
+        kind: "etf",
+        referenceId: "acwi-us",
+        ticker: "ACWI",
+        name: "iShares MSCI ACWI ETF",
+        allocationWeight: 100,
+      },
+    ],
+    etfSnapshots: new Map([["ACWI", preciseSnapshot]]),
+    directSecurities: new Map(),
+  });
+
+  assert.equal(
+    result.positions.find((position) => position.ticker === "AAPL")?.weight,
+    50.004,
+  );
+  assert.equal(
+    result.positions.find((position) => position.ticker === "MSFT")?.weight,
+    49.996,
+  );
+});
+
 test("recalculates a saved component definition from updated ETF holdings", () => {
   const item: PortfolioItem = {
     id: "etf",

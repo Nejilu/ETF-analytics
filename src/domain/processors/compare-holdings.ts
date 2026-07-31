@@ -7,19 +7,12 @@ import type {
   SleevePosition,
 } from "@/domain/etf";
 
+import { normalizeHoldingWeights } from "./normalize-holding-weights";
+
 const round = (value: number, decimals = 2) =>
   Number(value.toFixed(decimals));
 
-const roundPositionWeight = (value: number) => round(value, 6);
-
-function normalize(holdings: Holding[]): Holding[] {
-  const total = holdings.reduce((sum, holding) => sum + holding.weight, 0);
-  if (total <= 0) return holdings;
-  return holdings.map((holding) => ({
-    ...holding,
-    weight: (holding.weight / total) * 100,
-  }));
-}
+const roundPositionWeight = (value: number) => round(value, 10);
 
 function topConcentration(holdings: Holding[], count: number) {
   return round(
@@ -111,7 +104,7 @@ function buildImplicitSleeve(
   return {
     sourceTicker,
     relativeToTicker,
-    sourceActiveWeight,
+    sourceActiveWeight: roundPositionWeight(sourceActiveWeight),
     positionsCount: normalizedPositions.length,
     top10Concentration: round(
       normalizedPositions
@@ -126,8 +119,8 @@ export function compareHoldings(
   leftSnapshot: HoldingsSnapshot,
   rightSnapshot: HoldingsSnapshot,
 ): ComparisonResult {
-  const leftHoldings = normalize(leftSnapshot.holdings);
-  const rightHoldings = normalize(rightSnapshot.holdings);
+  const leftHoldings = normalizeHoldingWeights(leftSnapshot.holdings);
+  const rightHoldings = normalizeHoldingWeights(rightSnapshot.holdings);
   const leftMap = new Map(leftHoldings.map((holding) => [holding.securityId, holding]));
   const rightMap = new Map(rightHoldings.map((holding) => [holding.securityId, holding]));
   const securityIds = new Set([...leftMap.keys(), ...rightMap.keys()]);
@@ -157,10 +150,27 @@ export function compareHoldings(
         Math.max(a.leftActiveWeight, a.rightActiveWeight, a.overlapWeight),
     );
 
-  const overlapWeight = round(
-    rawPositions.reduce((sum, position) => sum + position.overlapWeight, 0),
+  const rawOverlapWeight = rawPositions.reduce(
+    (sum, position) => sum + position.overlapWeight,
+    0,
   );
-  const activeSleeveWeight = round(100 - overlapWeight);
+  const rawActiveSleeveWeight = Math.max(0, 100 - rawOverlapWeight);
+  const overlapWeight = round(rawOverlapWeight);
+  const activeSleeveWeight = round(rawActiveSleeveWeight);
+  const leftImplicitSleeve = buildImplicitSleeve(
+    rawPositions,
+    "left",
+    leftSnapshot.etf.ticker,
+    rightSnapshot.etf.ticker,
+    rawActiveSleeveWeight,
+  );
+  const rightImplicitSleeve = buildImplicitSleeve(
+    rawPositions,
+    "right",
+    rightSnapshot.etf.ticker,
+    leftSnapshot.etf.ticker,
+    rawActiveSleeveWeight,
+  );
   const positions: SleevePosition[] = rawPositions.map((position) => ({
     ...position,
     leftWeight: roundPositionWeight(position.leftWeight),
@@ -169,20 +179,6 @@ export function compareHoldings(
     leftActiveWeight: roundPositionWeight(position.leftActiveWeight),
     rightActiveWeight: roundPositionWeight(position.rightActiveWeight),
   }));
-  const leftImplicitSleeve = buildImplicitSleeve(
-    positions,
-    "left",
-    leftSnapshot.etf.ticker,
-    rightSnapshot.etf.ticker,
-    activeSleeveWeight,
-  );
-  const rightImplicitSleeve = buildImplicitSleeve(
-    positions,
-    "right",
-    rightSnapshot.etf.ticker,
-    leftSnapshot.etf.ticker,
-    activeSleeveWeight,
-  );
 
   return {
     left: {

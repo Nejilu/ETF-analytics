@@ -100,8 +100,9 @@ export function parseIsharesHoldingsCsv(raw: string): ParsedHoldingsFile {
       const name = valueAt(row, nameIndex);
       const ticker = valueAt(row, tickerIndex, "—");
       const weight = toNumber(valueAt(row, weightIndex));
+      const marketValue = toNumber(valueAt(row, marketValueIndex));
       const isin = valueAt(row, isinIndex);
-      if (!name || weight <= 0) return null;
+      if (!name || (weight <= 0 && marketValue <= 0)) return null;
 
       return {
         securityId:
@@ -113,7 +114,7 @@ export function parseIsharesHoldingsCsv(raw: string): ParsedHoldingsFile {
         country: valueAt(row, countryIndex, "Not reported"),
         isin: isin || undefined,
         weight,
-        marketValue: toNumber(valueAt(row, marketValueIndex)) || undefined,
+        marketValue: marketValue || undefined,
         currency: valueAt(row, currencyIndex) || undefined,
       };
     })

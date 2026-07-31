@@ -39,7 +39,7 @@ export const ETF_CATALOG: CatalogGroup[] = [
         productUrl:
           "https://www.ishares.com/uk/individual/en/products/253743/ishares-core-s-p-500-ucits-etf",
         holdingsUrl:
-          "https://www.ishares.com/uk/individual/en/products/253743/ishares-core-s-p-500-ucits-etf/1506575576011.ajax?fileType=csv&fileName=CSPX_holdings&dataType=fund",
+          "https://www.ishares.com/ch/individual/en/products/253743/ishares-core-s-p-500-ucits-etf/1495092304805.ajax?fileType=csv&fileName=CSPX_holdings&dataType=fund",
       },
     ],
   },
@@ -123,7 +123,7 @@ export const ETF_CATALOG: CatalogGroup[] = [
         productUrl:
           "https://www.ishares.com/uk/individual/en/products/251850/ishares-msci-acwi-ucits-etf",
         holdingsUrl:
-          "https://www.ishares.com/uk/individual/en/products/251850/ishares-msci-acwi-ucits-etf/1506575576011.ajax?fileType=csv&fileName=SSAC_holdings&dataType=fund",
+          "https://www.ishares.com/ch/individual/en/products/251850/ishares-msci-acwi-ucits-etf/1495092304805.ajax?fileType=csv&fileName=SSAC_holdings&dataType=fund",
       },
     ],
   },
@@ -165,7 +165,7 @@ export const ETF_CATALOG: CatalogGroup[] = [
         productUrl:
           "https://www.ishares.com/uk/individual/en/products/264659/ishares-core-msci-em-imi-ucits-etf",
         holdingsUrl:
-          "https://www.ishares.com/uk/individual/en/products/264659/ishares-core-msci-em-imi-ucits-etf/1506575576011.ajax?fileType=csv&fileName=EIMI_holdings&dataType=fund",
+          "https://www.ishares.com/ch/individual/en/products/264659/ishares-core-msci-em-imi-ucits-etf/1495092304805.ajax?fileType=csv&fileName=EIMI_holdings&dataType=fund",
       },
     ],
   },
@@ -251,7 +251,7 @@ export const ETF_CATALOG: CatalogGroup[] = [
         productUrl:
           "https://www.ishares.com/uk/individual/en/products/296576/ishares-msci-world-small-cap-ucits-etf",
         holdingsUrl:
-          "https://www.ishares.com/uk/individual/en/products/296576/ishares-msci-world-small-cap-ucits-etf/1506575576011.ajax?fileType=csv&fileName=IUSN_holdings&dataType=fund",
+          "https://www.ishares.com/ch/individual/en/products/296576/ishares-msci-world-small-cap-ucits-etf/1495092304805.ajax?fileType=csv&fileName=IUSN_holdings&dataType=fund",
       },
     ],
   },

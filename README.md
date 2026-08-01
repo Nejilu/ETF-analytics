@@ -37,6 +37,9 @@ local `.env` file to move the database without changing application code:
 DATABASE_PATH=.data/index-lens.sqlite
 HOLDINGS_CACHE_TTL_SECONDS=86400
 MARKET_PRICE_TTL_SECONDS=86400
+TRADINGVIEW_METRICS_TTL_SECONDS=86400
+TRADINGVIEW_BATCH_SIZE=500
+TRADINGVIEW_ESTIMATES_BATCH_SIZE=250
 ```
 
 Relative paths resolve from the project root. The database and its WAL files
@@ -50,6 +53,13 @@ npm test           # processor tests plus a legacy-database migration smoke test
 npm run db:setup   # apply migrations and seed the ETF catalog
 npm run db:stats   # show row counts and database size
 npm run db:backup  # create a safe SQLite backup
+```
+
+Legacy TradingView resolution databases can be imported once, before their
+source folder is retired:
+
+```bash
+npm run db:import-tradingview-mappings -- path/to/stocks.sqlite
 ```
 
 After a code update, run:
@@ -92,6 +102,16 @@ are written below `.data/backups/`.
   definitions keep their constituent list and normalized weights unchanged and
   appear under the `Custom ACWI ETFs` catalog group.
 - Use a persistent light or dark interface theme.
+- Resolve constituent listings to TradingView symbols using the iShares exchange,
+  imported ticker disambiguation rules and country fallbacks for legacy snapshots.
+- Fetch fundamental and risk fields through grouped TradingView Screener requests,
+  and retrieve EPS consensus histories through grouped TradingView quote sessions.
+- Build an estimates-only earnings series from the consensus attached to the four
+  latest reported quarters and the current consensus for the next four quarters.
+  Reported EPS and reconstructed adjusted EPS are never used in P/E or growth.
+- Calculate each security's P/E from its local-currency price divided by a rolling
+  four-quarter consensus EPS sum. ETF P/E uses a holding-weighted harmonic mean;
+  other aggregate metrics use covered-weight arithmetic means and disclose coverage.
 - Expose versioned endpoints: `/api/v1/catalog`,
   `/api/v1/holdings/:ticker` and
   `/api/v1/compare?left=IVV&right=ACWI`, plus `/api/v1/portfolio` and
@@ -99,6 +119,10 @@ are written below `.data/backups/`.
   `/api/v1/prices/quote`, and portfolio ETFs are created through
   `/api/v1/portfolio/save-as-etf`. Frozen ACWI ETFs are created through
   `/api/v1/etf-creator`.
+- Expose holding-weighted constituent metrics through
+  `/api/v1/metrics/overview?etfs=ivv-us,acwi-us`.
+- Probe live historical and forward estimate coverage, including non-USD primary
+  listings, with `npm run test:tradingview-estimates`.
 - Provide versioned Drizzle migrations for the local database.
 
 ## Architecture

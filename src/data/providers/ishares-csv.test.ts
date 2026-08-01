@@ -37,3 +37,20 @@ test("parses US-style holdings dates without a timezone shift", () => {
 
   assert.equal(parsed.asOf, "2026-07-30");
 });
+
+test("retains the listing exchange used by provider symbol resolution", () => {
+  const parsed = parseIsharesHoldingsCsv(
+    [
+      'Fund Holdings as of,"Jul 30, 2026"',
+      "Ticker,Name,Sector,Asset Class,Weight (%),Market Value,Location,Exchange,ISIN",
+      "AAPL,Apple,Technology,Equity,50,500,United States,NASDAQ,US0378331005",
+      "MSFT,Microsoft,Technology,Equity,20,200,United States,NASDAQ,US5949181045",
+      "JPM,JPMorgan,Financials,Equity,15,150,United States,New York Stock Exchange,US46625H1005",
+      "NOVN,Novartis,Health Care,Equity,10,100,Switzerland,SIX Swiss Exchange,CH0012005267",
+      "NESN,Nestle,Consumer Staples,Equity,5,50,Switzerland,SIX Swiss Exchange,CH0038863350",
+    ].join("\n"),
+  );
+
+  assert.equal(parsed.holdings[0].exchange, "NASDAQ");
+  assert.equal(parsed.holdings[2].exchange, "New York Stock Exchange");
+});

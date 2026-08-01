@@ -20,6 +20,7 @@ const tables = [
   "fx_rates",
   "metric_definitions",
   "metric_observations",
+  "security_provider_symbols",
 ] as const;
 
 console.log(`Database: ${databasePath()}`);

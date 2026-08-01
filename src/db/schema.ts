@@ -81,6 +81,28 @@ export const securities = sqliteTable(
   ],
 );
 
+export const securityProviderSymbols = sqliteTable(
+  "security_provider_symbols",
+  {
+    provider: text("provider").notNull(),
+    securityId: text("security_id")
+      .notNull()
+      .references(() => securities.id, { onDelete: "cascade" }),
+    providerSymbol: text("provider_symbol"),
+    status: text("status").notNull(),
+    confidence: real("confidence"),
+    lastVerifiedAt: text("last_verified_at").notNull(),
+    metadataJson: text("metadata_json", { mode: "json" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.securityId] }),
+    index("security_provider_symbols_symbol_idx").on(
+      table.provider,
+      table.providerSymbol,
+    ),
+  ],
+);
+
 export const holdingSnapshots = sqliteTable(
   "holding_snapshots",
   {

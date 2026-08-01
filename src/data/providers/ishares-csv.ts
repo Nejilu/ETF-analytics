@@ -115,6 +115,7 @@ export function parseIsharesHoldingsCsv(raw: string): ParsedHoldingsFile {
   const countryIndex = findColumn(headers, ["Location", "Country"]);
   const isinIndex = findColumn(headers, ["ISIN"]);
   const currencyIndex = findColumn(headers, ["Currency", "Market Currency"]);
+  const exchangeIndex = findColumn(headers, ["Exchange", "Market"]);
 
   const parsedHoldings = rows
     .slice(headerIndex + 1)
@@ -138,6 +139,7 @@ export function parseIsharesHoldingsCsv(raw: string): ParsedHoldingsFile {
         weight,
         marketValue: marketValue || undefined,
         currency: valueAt(row, currencyIndex) || undefined,
+        exchange: valueAt(row, exchangeIndex) || undefined,
       };
     })
     .filter((holding): holding is Holding => holding !== null);

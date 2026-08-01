@@ -51,6 +51,8 @@ try {
   executeMigration("0001_local_persistence.sql");
   executeMigration("0002_cold_firelord.sql");
   executeMigration("0003_safe_sentry.sql");
+  executeMigration("0004_sturdy_mentallo.sql");
+  executeMigration("0005_dark_sentinels.sql");
 
   const upgradedEtf = sqlite
     .prepare(
@@ -68,13 +70,15 @@ try {
   const tables = sqlite
     .prepare(
       `SELECT name FROM sqlite_master
-       WHERE type = 'table' AND name IN ('portfolios', 'portfolio_items')
+       WHERE type = 'table' AND name IN (
+         'portfolios', 'portfolio_items', 'security_provider_symbols'
+       )
        ORDER BY name`,
     )
     .all();
   assert.deepEqual(
     tables.map((table) => table.name),
-    ["portfolio_items", "portfolios"],
+    ["portfolio_items", "portfolios", "security_provider_symbols"],
   );
 
   console.log("Migration smoke test passed.");

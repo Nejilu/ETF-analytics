@@ -1,0 +1,49 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import type { SecurityEstimateSeries } from "@/domain/metrics";
+import { deriveEstimateSeriesMetrics } from "./derive-estimate-metrics";
+
+const msft: SecurityEstimateSeries = {
+  providerSymbol: "NASDAQ:MSFT",
+  currency: "USD",
+  price: 464.72,
+  points: [
+    ["2026-Q1", 3.673318, true],
+    ["2026-Q2", 3.902866, true],
+    ["2026-Q3", 4.061552, true],
+    ["2026-Q4", 4.239277, true],
+    ["2027-Q1", 4.715176, false],
+    ["2027-Q2", 4.838606, false],
+    ["2027-Q3", 4.879865, false],
+    ["2027-Q4", 5.170883, false],
+  ].map(([fiscalPeriod, estimate, isHistorical]) => ({
+    fiscalPeriod: fiscalPeriod as string,
+    estimate: estimate as number,
+    isHistorical: isHistorical as boolean,
+    estimateDate: null,
+    analystCount: 36,
+  })),
+};
+
+test("builds every P/E window and growth from estimates only", () => {
+  const result = deriveEstimateSeriesMetrics(msft);
+  const historical = 3.673318 + 3.902866 + 4.061552 + 4.239277;
+  const forward = 4.715176 + 4.838606 + 4.879865 + 5.170883;
+  assert.ok(Math.abs((result.pe_estimate_window_0 ?? 0) - 464.72 / historical) < 1e-9);
+  assert.ok(Math.abs((result.pe_estimate_window_4 ?? 0) - 464.72 / forward) < 1e-9);
+  assert.ok(Math.abs((result.eps_growth_estimate_forward_4q ?? 0) - (forward / historical - 1) * 100) < 1e-9);
+});
+
+test("keeps local-currency price and EPS internally consistent", () => {
+  const twse = {
+    ...msft,
+    providerSymbol: "TWSE:2330",
+    currency: "TWD",
+    price: 2425,
+    points: msft.points.map((point, index) => ({ ...point, estimate: 15 + index * 2 })),
+  };
+  const result = deriveEstimateSeriesMetrics(twse);
+  assert.equal(result.pe_estimate_window_0, 2425 / (15 + 17 + 19 + 21));
+  assert.equal(result.pe_estimate_window_4, 2425 / (23 + 25 + 27 + 29));
+});

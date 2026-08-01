@@ -17,12 +17,15 @@
     "test": "tsx scripts/test-processors.ts && node scripts/test-migrations.mjs",
     "test:migrations": "node scripts/test-migrations.mjs",
     "test:portfolio": "tsx src/domain/processors/analyze-portfolio.test.ts",
+    "test:tradingview": "tsx scripts/test-tradingview-estimates.ts",
+    "test:tradingview-estimates": "tsx scripts/test-tradingview-estimates.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/db-migrate.ts",
     "db:seed": "tsx scripts/db-seed.ts",
     "db:setup": "tsx scripts/db-setup.ts",
     "db:stats": "tsx scripts/db-stats.ts",
-    "db:backup": "tsx scripts/db-backup.ts"
+    "db:backup": "tsx scripts/db-backup.ts",
+    "db:import-tradingview-mappings": "tsx scripts/import-tradingview-mappings.ts"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.2",
@@ -35,6 +38,7 @@
     "recharts": "3.10.1",
     "server-only": "0.0.1",
     "tsx": "^4.23.1",
+    "ws": "^8.21.1",
     "yahoo-finance2": "^3.14.1"
   },
   "devDependencies": {
@@ -42,6 +46,7 @@
     "@types/node": "^22.15.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
+    "@types/ws": "^8.18.1",
     "drizzle-kit": "^0.31.4",
     "eslint": "^9.39.0",
     "eslint-config-next": "16.2.12",

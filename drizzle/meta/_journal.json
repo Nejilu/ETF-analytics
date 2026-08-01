@@ -36,6 +36,13 @@
       "when": 1785473315086,
       "tag": "0004_sturdy_mentallo",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1785535510595,
+      "tag": "0005_dark_sentinels",
+      "breakpoints": true
     }
   ]
 }

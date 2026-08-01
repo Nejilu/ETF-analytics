@@ -78,6 +78,7 @@ export interface Holding {
   weight: number;
   marketValue?: number;
   currency?: string;
+  exchange?: string;
 }
 
 export interface ConstituentCoverage {

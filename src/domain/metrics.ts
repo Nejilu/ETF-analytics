@@ -1,0 +1,249 @@
+export const METRIC_KEYS = [
+  "pe_estimate_window_0",
+  "pe_estimate_window_1",
+  "pe_estimate_window_2",
+  "pe_estimate_window_3",
+  "pe_estimate_window_4",
+  "eps_growth_estimate_forward_4q",
+  "price_to_book",
+  "price_to_sales",
+  "dividend_yield",
+  "return_on_equity",
+  "debt_to_equity",
+  "beta_1y",
+] as const;
+
+export type MetricKey = (typeof METRIC_KEYS)[number];
+
+export const DERIVED_METRIC_KEYS = [
+  "pe_estimate_window_0",
+  "pe_estimate_window_1",
+  "pe_estimate_window_2",
+  "pe_estimate_window_3",
+  "pe_estimate_window_4",
+  "eps_growth_estimate_forward_4q",
+] as const satisfies readonly MetricKey[];
+
+export interface MetricDefinitionView {
+  key: MetricKey;
+  name: string;
+  shortName: string;
+  description: string;
+  category: "Valuation" | "Earnings" | "Quality" | "Income & risk";
+  unit: "multiple" | "percent" | "number";
+  tradingViewColumn: string | null;
+  decimals: number;
+  aggregate: boolean;
+  showInOverview: boolean;
+  formula?: string;
+  aggregation?: "weighted_mean" | "weighted_harmonic";
+  validRange?: { min: number; max: number };
+}
+
+const ESTIMATE_PE_DEFINITIONS = ([0, 1, 2, 3, 4] as const).map((window): MetricDefinitionView => ({
+  key: `pe_estimate_window_${window}` as MetricKey,
+  name: window === 0
+    ? "P/E on the four latest historical consensus estimates"
+    : window === 4
+      ? "P/E on the next four quarterly consensus estimates"
+      : `P/E estimate path (+${window} quarter${window > 1 ? "s" : ""})`,
+  shortName: window === 0
+    ? "P/E estimated trailing 4Q"
+    : window === 4
+      ? "P/E estimated forward 4Q"
+      : `P/E estimate +${window}Q`,
+  description: window === 0
+    ? "Current local-currency price divided by the sum of the consensus estimates attached to the four latest reported quarters; reported EPS is never used."
+    : window === 4
+      ? "Current local-currency price divided by the sum of the next four quarterly consensus estimates."
+      : "Current local-currency price divided by a rolling four-quarter EPS window built exclusively from consensus estimates.",
+  category: "Valuation",
+  unit: "multiple",
+  tradingViewColumn: null,
+  decimals: 1,
+  aggregate: true,
+  showInOverview: window === 0 || window === 4,
+  formula: `local_price / sum(consensus_eps_quarters_${window}_through_${window + 3})`,
+  aggregation: "weighted_harmonic",
+}));
+
+export const METRIC_DEFINITIONS: readonly MetricDefinitionView[] = [
+  ...ESTIMATE_PE_DEFINITIONS,
+  {
+    key: "eps_growth_estimate_forward_4q",
+    name: "Expected EPS growth (next four quarters)",
+    shortName: "Estimated EPS growth next 4Q",
+    description: "Sum of the next four quarterly consensus estimates versus the consensus estimates attached to the four latest reported quarters; no reported EPS is used.",
+    category: "Earnings",
+    unit: "percent",
+    tradingViewColumn: null,
+    decimals: 1,
+    aggregate: true,
+    showInOverview: true,
+    formula: "(sum(next_4q_consensus_eps) / sum(last_4q_historical_consensus_eps) - 1) * 100",
+    validRange: { min: -100, max: 300 },
+  },
+  {
+    key: "price_to_book",
+    name: "Price / book",
+    shortName: "P/B",
+    description: "Weighted average price-to-book multiple.",
+    category: "Valuation",
+    unit: "multiple",
+    tradingViewColumn: "price_book_fq",
+    decimals: 1,
+    aggregate: true,
+    showInOverview: true,
+  },
+  {
+    key: "price_to_sales",
+    name: "Price / sales",
+    shortName: "P/S",
+    description: "Weighted average price-to-sales multiple.",
+    category: "Valuation",
+    unit: "multiple",
+    tradingViewColumn: "price_sales_current",
+    decimals: 1,
+    aggregate: true,
+    showInOverview: true,
+  },
+  {
+    key: "dividend_yield",
+    name: "Dividend yield",
+    shortName: "Dividend",
+    description: "Weighted average current dividend yield.",
+    category: "Income & risk",
+    unit: "percent",
+    tradingViewColumn: "dividends_yield_current",
+    decimals: 2,
+    aggregate: true,
+    showInOverview: true,
+  },
+  {
+    key: "return_on_equity",
+    name: "Return on equity",
+    shortName: "ROE",
+    description: "Weighted average return on common equity.",
+    category: "Quality",
+    unit: "percent",
+    tradingViewColumn: "return_on_equity",
+    decimals: 1,
+    aggregate: true,
+    showInOverview: true,
+  },
+  {
+    key: "debt_to_equity",
+    name: "Debt / equity",
+    shortName: "Debt / equity",
+    description: "Weighted average debt-to-equity ratio.",
+    category: "Quality",
+    unit: "number",
+    tradingViewColumn: "debt_to_equity",
+    decimals: 1,
+    aggregate: true,
+    showInOverview: true,
+  },
+  {
+    key: "beta_1y",
+    name: "Beta (1 year)",
+    shortName: "Beta",
+    description: "Weighted average one-year equity beta.",
+    category: "Income & risk",
+    unit: "number",
+    tradingViewColumn: "beta_1_year",
+    decimals: 2,
+    aggregate: true,
+    showInOverview: true,
+  },
+];
+
+export const SOURCE_METRIC_DEFINITIONS = METRIC_DEFINITIONS.filter(
+  (definition): definition is MetricDefinitionView & { tradingViewColumn: string } =>
+    definition.tradingViewColumn !== null,
+);
+
+export const OVERVIEW_METRIC_DEFINITIONS = METRIC_DEFINITIONS.filter(
+  (definition) => definition.showInOverview,
+);
+
+export interface EstimateSeriesPoint {
+  fiscalPeriod: string;
+  estimate: number;
+  isHistorical: boolean;
+  estimateDate: string | null;
+  analystCount: number | null;
+}
+
+export interface SecurityEstimateSeries {
+  providerSymbol: string;
+  currency: string;
+  price: number;
+  points: EstimateSeriesPoint[];
+}
+
+export interface SecurityMetricValues {
+  securityId: string;
+  providerSymbol: string;
+  values: Partial<Record<MetricKey, number>>;
+  estimateSeries?: SecurityEstimateSeries;
+}
+
+export interface WeightedMetric {
+  key: MetricKey;
+  value: number | null;
+  coverageWeight: number;
+  coveredHoldings: number;
+  totalHoldings: number;
+}
+
+export interface ComponentValuationPoint {
+  securityId: string;
+  ticker: string;
+  name: string;
+  sector: string;
+  country: string;
+  providerSymbol: string;
+  weight: number;
+  peHistoricalEstimate4q: number;
+  peForwardEstimate4q: number;
+  epsGrowthEstimate4q: number;
+  historicalEstimateSum: number;
+  forwardEstimateSum: number;
+  price: number;
+  currency: string;
+  estimatePoints: EstimateSeriesPoint[];
+}
+
+export interface ComponentValuationView {
+  points: ComponentValuationPoint[];
+  eligibleCount: number;
+  displayedCount: number;
+  excludedOutlierCount: number;
+  representedWeight: number;
+  axisLimits: {
+    minGrowth: number;
+    maxGrowth: number;
+    maxPe: number;
+  };
+}
+
+export interface EtfMetricsOverview {
+  etfId: string;
+  ticker: string;
+  name: string;
+  asOf: string;
+  holdingsCount: number;
+  mappedHoldings: number;
+  mappingCoverageWeight: number;
+  metrics: WeightedMetric[];
+  componentValuation: ComponentValuationView;
+}
+
+export interface MetricsOverviewResult {
+  calculatedAt: string;
+  source: "TradingView Screener + Estimates";
+  sourceStatus: "live" | "cached" | "stale";
+  cacheTtlHours: number;
+  definitions: MetricDefinitionView[];
+  etfs: EtfMetricsOverview[];
+}

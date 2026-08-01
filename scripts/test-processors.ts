@@ -5,3 +5,8 @@ import "../src/domain/processors/compare-holdings.test";
 import "../src/domain/processors/derive-market-value-holdings.test";
 import "../src/domain/security-equivalence.test";
 import "../src/domain/etf-creator.test";
+import "../src/data/providers/tradingview-symbols.test";
+import "../src/data/providers/tradingview-screener.test";
+import "../src/data/providers/tradingview-estimates.test";
+import "../src/domain/processors/aggregate-etf-metrics.test";
+import "../src/domain/processors/derive-estimate-metrics.test";

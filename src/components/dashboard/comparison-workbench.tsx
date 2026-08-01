@@ -16,6 +16,7 @@ import {
 
 import { PortfolioAnalytics } from "@/components/dashboard/portfolio-analytics";
 import { EtfCreator } from "@/components/dashboard/etf-creator";
+import { MetricsOverview } from "@/components/dashboard/metrics-overview";
 import type {
   CatalogGroup,
   ComparisonResult,
@@ -658,7 +659,7 @@ export function ComparisonWorkbench({
 }: ComparisonWorkbenchProps) {
   const [availableCatalog, setAvailableCatalog] = useState(catalog);
   const [workspaceView, setWorkspaceView] = useState<
-    "compare" | "portfolio" | "creator"
+    "compare" | "portfolio" | "creator" | "metrics"
   >("compare");
   const [leftEtfId, setLeftEtfId] = useState("ivv-us");
   const [rightEtfId, setRightEtfId] = useState("acwi-us");
@@ -774,10 +775,14 @@ export function ComparisonWorkbench({
             Exposures
             <small>Soon</small>
           </button>
-          <button className="nav-item nav-item--disabled" type="button">
+          <button
+            className={`nav-item${workspaceView === "metrics" ? " nav-item--active" : ""}`}
+            type="button"
+            aria-pressed={workspaceView === "metrics"}
+            onClick={() => setWorkspaceView("metrics")}
+          >
             <span className="nav-icon">⌗</span>
             Metrics
-            <small>Soon</small>
           </button>
         </nav>
         <div className="sidebar-card">
@@ -802,13 +807,17 @@ export function ComparisonWorkbench({
               ? "ETF comparison"
               : workspaceView === "portfolio"
                 ? "Portfolio analytics"
-                : "ETF Creator"}
+                : workspaceView === "creator"
+                  ? "ETF Creator"
+                  : "Metrics overview"}
           </div>
           <div className="topbar-actions">
             <span
               className={`source-badge ${
                 workspaceView === "portfolio" || workspaceView === "creator"
                   ? ""
+                  : workspaceView === "metrics"
+                    ? ""
                   : error
                     ? "source-badge--error"
                     : comparison
@@ -821,6 +830,8 @@ export function ComparisonWorkbench({
                 ? "Local portfolio"
                 : workspaceView === "creator"
                   ? "ACWI universe"
+                : workspaceView === "metrics"
+                  ? "TradingView"
                 : error
                   ? "Unavailable"
                   : comparison
@@ -853,6 +864,13 @@ export function ComparisonWorkbench({
               onClick={() => setWorkspaceView("creator")}
             >
               ETF Creator
+            </button>
+            <button
+              type="button"
+              className={workspaceView === "metrics" ? "is-active" : ""}
+              onClick={() => setWorkspaceView("metrics")}
+            >
+              Metrics
             </button>
           </div>
           {workspaceView === "compare" ? (
@@ -992,17 +1010,23 @@ export function ComparisonWorkbench({
               catalog={availableCatalog}
               onCatalogChanged={refreshCatalog}
             />
-          ) : (
+          ) : workspaceView === "creator" ? (
             <EtfCreator
               catalog={availableCatalog}
               onCatalogChanged={refreshCatalog}
+            />
+          ) : (
+            <MetricsOverview
+              catalog={availableCatalog}
+              initialEtfIds={[leftEtfId, rightEtfId]}
             />
           )}
 
           <footer className="disclaimer">
             <span>IndexLens</span>
             Indicative data sourced from fund and index providers. Holdings may
-            change without notice. This is not investment advice.
+            change without notice. Fundamental metrics are sourced from TradingView.
+            This is not investment advice.
           </footer>
         </div>
       </main>

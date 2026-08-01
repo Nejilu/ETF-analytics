@@ -18,6 +18,21 @@ import {
 
 type SnapshotRecord = typeof holdingSnapshots.$inferSelect;
 
+function exchangeFromIdentifiers(value: unknown): string | undefined {
+  const candidate = typeof value === "string"
+    ? (() => {
+        try {
+          return JSON.parse(value) as unknown;
+        } catch {
+          return undefined;
+        }
+      })()
+    : value;
+  if (!candidate || typeof candidate !== "object") return undefined;
+  const exchange = (candidate as Record<string, unknown>).exchange;
+  return typeof exchange === "string" && exchange.trim() ? exchange : undefined;
+}
+
 const INSERT_BATCH_SIZE = 75;
 
 function batches<T>(rows: T[]): T[][] {
@@ -63,6 +78,7 @@ export function loadSnapshot(
       marketValue: holdings.marketValue,
       currency: holdings.currency,
       securityCurrency: securities.currency,
+      identifiersJson: securities.identifiersJson,
     })
     .from(holdings)
     .innerJoin(
@@ -90,6 +106,7 @@ export function loadSnapshot(
       weight: row.weight,
       marketValue: row.marketValue ?? undefined,
       currency: row.currency ?? row.securityCurrency ?? undefined,
+      exchange: exchangeFromIdentifiers(row.identifiersJson),
     })).sort((left, right) => right.weight - left.weight),
   };
 }
@@ -163,6 +180,9 @@ export function persistSnapshot(
             sector: holding.sector,
             country: holding.country,
             currency: holding.currency,
+            identifiersJson: holding.exchange
+              ? { exchange: holding.exchange }
+              : null,
           })),
         )
         .onConflictDoUpdate({
@@ -175,6 +195,7 @@ export function persistSnapshot(
             sector: sql`excluded.sector`,
             country: sql`excluded.country`,
             currency: sql`excluded.currency`,
+            identifiersJson: sql`COALESCE(excluded.identifiers_json, ${securities.identifiersJson})`,
             updatedAt: sql`CURRENT_TIMESTAMP`,
           },
         })

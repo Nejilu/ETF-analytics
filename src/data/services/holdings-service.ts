@@ -2,7 +2,10 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 
-import { parseIsharesHoldingsCsv } from "@/data/providers/ishares-csv";
+import {
+  ISHARES_HOLDINGS_HASH_PREFIX,
+  parseIsharesHoldingsCsv,
+} from "@/data/providers/ishares-csv";
 import {
   assertPlausibleIsharesHoldingsCount,
   fetchIsharesHoldingsFile,
@@ -14,6 +17,7 @@ import {
   persistSnapshot,
 } from "@/db/repositories/holdings-repository";
 import { ensureLocalDatabase } from "@/db/bootstrap";
+import { databasePath } from "@/db/client";
 import {
   findEtfById,
   findEtfByReference,
@@ -28,8 +32,11 @@ import { analyzePortfolio } from "@/domain/processors/analyze-portfolio";
 import { deriveMarketValueHoldings } from "@/domain/processors/derive-market-value-holdings";
 import { normalizeHoldingWeights } from "@/domain/processors/normalize-holding-weights";
 import { valuePortfolioItems } from "./market-price-service";
+import { holdingsRefreshCacheKey } from "@/domain/holdings-cache";
+import { mapWithConcurrency } from "@/domain/async-utils";
 
 const DEFAULT_TTL_SECONDS = 60 * 60 * 24;
+const DEFAULT_REFRESH_CONCURRENCY = 4;
 const inFlightRefreshes = new Map<
   string,
   Promise<HoldingsSnapshot>
@@ -40,6 +47,13 @@ function cacheTtlSeconds() {
   return Number.isFinite(configured) && configured > 0
     ? configured
     : DEFAULT_TTL_SECONDS;
+}
+
+export function holdingsRefreshConcurrency(): number {
+  const configured = Number(process.env.HOLDINGS_REFRESH_CONCURRENCY);
+  return Number.isInteger(configured) && configured >= 1 && configured <= 8
+    ? configured
+    : DEFAULT_REFRESH_CONCURRENCY;
 }
 
 function isFresh(fetchedAt: string, ttlSeconds: number): boolean {
@@ -91,8 +105,10 @@ async function buildPortfolioEtfSnapshot(
     }
   }
 
-  const snapshots = await Promise.all(
-    etfItems.map((item) => getHoldingsSnapshot(item.referenceId)),
+  const snapshots = await mapWithConcurrency(
+    etfItems,
+    holdingsRefreshConcurrency(),
+    (item) => getHoldingsSnapshot(item.referenceId),
   );
   const directSecurities = findSecuritiesByIds(
     valuedPortfolio.items
@@ -267,8 +283,16 @@ async function refreshHoldings(
   const latestIsPlausible = latest
     ? isPlausibleIsharesHoldingsCount(etf.id, latest.rowCount)
     : false;
+  const latestUsesCurrentNormalization = Boolean(
+    latest?.sourceHash?.startsWith(ISHARES_HOLDINGS_HASH_PREFIX),
+  );
 
-  if (latest && latestIsPlausible && isFresh(latest.fetchedAt, ttlSeconds)) {
+  if (
+    latest &&
+    latestIsPlausible &&
+    latestUsesCurrentNormalization &&
+    isFresh(latest.fetchedAt, ttlSeconds)
+  ) {
     return loadSnapshot(etf, latest, "cached", ttlHours);
   }
 
@@ -276,6 +300,10 @@ async function refreshHoldings(
     let fetched = await fetchIsharesHoldingsFile(
       etf,
       ttlSeconds,
+      // A legacy normalization still needs to be parsed again, but it does
+      // not require bypassing the HTTP cache. Keep no-store for the separate
+      // incomplete-snapshot recovery path so an outage cannot turn every
+      // request into an unconditional download attempt.
       Boolean(latest && !latestIsPlausible),
     );
     let parsed = parseIsharesHoldingsCsv(fetched.raw);
@@ -293,7 +321,9 @@ async function refreshHoldings(
       asOf: parsed.asOf,
       fetchedAt,
       sourceUrl: fetched.sourceUrl,
-      sourceHash: createHash("sha256").update(fetched.raw).digest("hex"),
+      sourceHash: `${ISHARES_HOLDINGS_HASH_PREFIX}${createHash("sha256")
+        .update(fetched.raw)
+        .digest("hex")}`,
       holdings: parsed.holdings,
     });
 
@@ -310,15 +340,37 @@ export async function getHoldingsSnapshot(
   reference: string,
 ): Promise<HoldingsSnapshot> {
   const normalizedReference = reference.trim();
-  const cacheKey =
-    findEtfByReference(normalizedReference)?.id ??
-    normalizedReference.toUpperCase();
+  let etf: ReturnType<typeof findEtfByReference>;
+  try {
+    ensureLocalDatabase();
+    etf = findEtfByReference(normalizedReference);
+  } catch (error) {
+    throw new HoldingsUnavailableError(
+      normalizedReference,
+      normalizedReference,
+      error,
+    );
+  }
+  const cacheKey = holdingsRefreshCacheKey(
+    databasePath(),
+    normalizedReference,
+    etf?.id,
+  );
   const existing = inFlightRefreshes.get(cacheKey);
   if (existing) return existing;
 
-  const refresh = refreshHoldings(normalizedReference).finally(() => {
-    inFlightRefreshes.delete(cacheKey);
-  });
+  const refresh = refreshHoldings(normalizedReference)
+    .catch((error) => {
+      if (error instanceof HoldingsUnavailableError) throw error;
+      throw new HoldingsUnavailableError(
+        etf?.ticker ?? normalizedReference,
+        etf?.id ?? normalizedReference,
+        error,
+      );
+    })
+    .finally(() => {
+      inFlightRefreshes.delete(cacheKey);
+    });
   inFlightRefreshes.set(cacheKey, refresh);
   return refresh;
 }

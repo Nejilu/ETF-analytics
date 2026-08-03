@@ -2343,6 +2343,25 @@ tbody tr:hover {
   max-width: 660px;
 }
 
+.creator-source-selector {
+  margin-top: 16px;
+  max-width: 420px;
+  position: relative;
+  z-index: 2;
+}
+
+.creator-source-selector .field > span {
+  color: var(--muted);
+}
+
+.creator-source-selector small {
+  color: var(--muted);
+  display: block;
+  font-size: 8px;
+  line-height: 1.4;
+  margin-top: 6px;
+}
+
 .creator-source-card {
   align-items: flex-end;
   display: flex;

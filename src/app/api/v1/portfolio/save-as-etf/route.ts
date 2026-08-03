@@ -1,4 +1,33 @@
-import { savePortfolioAsEtf } from "@/data/services/portfolio-service";
+import {
+  PortfolioRequestError,
+  PortfolioUnavailableError,
+  savePortfolioAsEtf,
+} from "@/data/services/portfolio-service";
+
+function errorResponse(error: unknown): Response {
+  if (error instanceof SyntaxError) {
+    return Response.json(
+      { error: "Request body must be valid JSON." },
+      { status: 400, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  if (error instanceof PortfolioRequestError) {
+    return Response.json(
+      { error: error.message },
+      { status: 400, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  if (error instanceof PortfolioUnavailableError) {
+    return Response.json(
+      { error: error.message || "Portfolio data is unavailable." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  return Response.json(
+    { error: "The portfolio ETF could not be saved." },
+    { status: 500, headers: { "Cache-Control": "no-store" } },
+  );
+}
 
 export async function POST(request: Request) {
   try {
@@ -7,10 +36,16 @@ export async function POST(request: Request) {
       name?: string;
       description?: string;
     };
-    if (typeof payload.ticker !== "string" || typeof payload.name !== "string") {
+    if (
+      !payload ||
+      typeof payload !== "object" ||
+      typeof payload.ticker !== "string" ||
+      typeof payload.name !== "string" ||
+      (payload.description !== undefined && typeof payload.description !== "string")
+    ) {
       return Response.json(
         { error: "Ticker and ETF name are required." },
-        { status: 400 },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
       );
     }
 
@@ -24,14 +59,6 @@ export async function POST(request: Request) {
       { status: 201, headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
-    return Response.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "The portfolio ETF could not be saved.",
-      },
-      { status: 400, headers: { "Cache-Control": "no-store" } },
-    );
+    return errorResponse(error);
   }
 }

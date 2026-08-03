@@ -4,6 +4,26 @@ export type PortfolioAssetKind = "etf" | "security";
 export type PortfolioInputMode = "value" | "shares";
 export type PriceStatus = "live" | "cached" | "stale";
 
+export class MarketPriceRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MarketPriceRequestError";
+  }
+}
+
+export class MarketPriceUnavailableError extends Error {
+  constructor(cause?: unknown) {
+    super(
+      cause instanceof Error
+        ? cause.message
+        : typeof cause === "string"
+          ? cause
+          : "The market price is unavailable.",
+    );
+    this.name = "MarketPriceUnavailableError";
+  }
+}
+
 export interface PortfolioItem {
   id: string;
   kind: PortfolioAssetKind;

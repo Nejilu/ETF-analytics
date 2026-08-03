@@ -2,6 +2,7 @@ import "server-only";
 
 import { ensureLocalDatabase } from "@/db/bootstrap";
 import {
+  findEtfById,
   findEtfByTicker,
 } from "@/db/repositories/catalog-repository";
 import { saveCreatedEtf } from "@/db/repositories/etf-creator-repository";
@@ -15,31 +16,61 @@ interface CreateEtfDraft {
   ticker: string;
   name: string;
   description?: string;
+  sourceEtfId: string;
   selectedSecurityIds: string[];
   criteria: EtfCreatorCriteria;
 }
 
 const MAX_SELECTED_SECURITIES = 5_000;
 
+export class EtfCreatorRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EtfCreatorRequestError";
+  }
+}
+
+export class EtfCreatorUnavailableError extends Error {
+  constructor(cause?: unknown) {
+    super(
+      cause instanceof Error
+        ? cause.message
+        : typeof cause === "string"
+          ? cause
+          : "The selected ETF source data is unavailable.",
+    );
+    this.name = "EtfCreatorUnavailableError";
+  }
+}
+
 function validatedCriteria(criteria: EtfCreatorCriteria): EtfCreatorCriteria {
+  if (!criteria || typeof criteria !== "object" || Array.isArray(criteria)) {
+    throw new EtfCreatorRequestError("Invalid selection criteria.");
+  }
   const countryMode = criteria?.countryMode;
   const sectorMode = criteria?.sectorMode;
   const overlapMode = criteria?.overlapMode;
   if (countryMode !== "include" && countryMode !== "exclude") {
-    throw new Error("Invalid geography filter mode.");
+    throw new EtfCreatorRequestError("Invalid geography filter mode.");
   }
   if (sectorMode !== "include" && sectorMode !== "exclude") {
-    throw new Error("Invalid sector filter mode.");
+    throw new EtfCreatorRequestError("Invalid sector filter mode.");
   }
   if (
     overlapMode !== "none" &&
     overlapMode !== "include" &&
     overlapMode !== "exclude"
   ) {
-    throw new Error("Invalid overlap filter mode.");
+    throw new EtfCreatorRequestError("Invalid overlap filter mode.");
   }
   if (!Array.isArray(criteria.countries) || !Array.isArray(criteria.sectors)) {
-    throw new Error("Invalid selection criteria.");
+    throw new EtfCreatorRequestError("Invalid selection criteria.");
+  }
+  if (
+    criteria.countries.some((value) => typeof value !== "string") ||
+    criteria.sectors.some((value) => typeof value !== "string")
+  ) {
+    throw new EtfCreatorRequestError("Invalid selection criteria.");
   }
 
   const cleanValues = (values: string[]) =>
@@ -56,42 +87,80 @@ function validatedCriteria(criteria: EtfCreatorCriteria): EtfCreatorCriteria {
   };
 }
 
-export async function createEtfFromAcwi(
+export async function createEtfFromSource(
   draft: CreateEtfDraft,
 ): Promise<EtfShareClass> {
-  ensureLocalDatabase();
+  try {
+    ensureLocalDatabase();
+  } catch (error) {
+    throw new EtfCreatorUnavailableError(error);
+  }
+  if (!draft || typeof draft !== "object") {
+    throw new EtfCreatorRequestError("ETF creator data is required.");
+  }
+  if (
+    typeof draft.ticker !== "string" ||
+    typeof draft.name !== "string" ||
+    typeof draft.sourceEtfId !== "string" ||
+    (draft.description !== undefined && typeof draft.description !== "string") ||
+    !Array.isArray(draft.selectedSecurityIds) ||
+    draft.selectedSecurityIds.some((id) => typeof id !== "string")
+  ) {
+    throw new EtfCreatorRequestError("Ticker, base ETF, name and holdings must be valid.");
+  }
   const ticker = draft.ticker.trim().toUpperCase();
   const name = draft.name.trim();
+  const sourceEtfId = draft.sourceEtfId.trim();
   const customDescription = draft.description?.trim();
 
   if (!/^[A-Z][A-Z0-9.-]{1,9}$/.test(ticker)) {
-    throw new Error("Use a ticker of 2 to 10 letters, numbers, dots or hyphens.");
+    throw new EtfCreatorRequestError("Use a ticker of 2 to 10 letters, numbers, dots or hyphens.");
   }
   if (name.length < 3 || name.length > 80) {
-    throw new Error("The ETF name must contain between 3 and 80 characters.");
+    throw new EtfCreatorRequestError("The ETF name must contain between 3 and 80 characters.");
   }
   if (customDescription && customDescription.length > 240) {
-    throw new Error("The description cannot exceed 240 characters.");
+    throw new EtfCreatorRequestError("The description cannot exceed 240 characters.");
   }
-  if (findEtfByTicker(ticker)) {
-    throw new Error(`Ticker ${ticker} is already used.`);
+  if (!sourceEtfId) {
+    throw new EtfCreatorRequestError("Select a base ETF before saving.");
   }
-  if (!Array.isArray(draft.selectedSecurityIds)) {
-    throw new Error("A manual security selection is required.");
+  try {
+    if (findEtfByTicker(ticker)) {
+      throw new EtfCreatorRequestError(`Ticker ${ticker} is already used.`);
+    }
+  } catch (error) {
+    if (error instanceof EtfCreatorRequestError) throw error;
+    throw new EtfCreatorUnavailableError(error);
+  }
+
+  let sourceEtf;
+  try {
+    sourceEtf = findEtfById(sourceEtfId);
+  } catch (error) {
+    throw new EtfCreatorUnavailableError(error);
+  }
+  if (!sourceEtf) {
+    throw new EtfCreatorRequestError("The selected base ETF is no longer available.");
   }
 
   const selectedSecurityIds = [
     ...new Set(draft.selectedSecurityIds.map((id) => id.trim()).filter(Boolean)),
   ];
   if (selectedSecurityIds.length === 0) {
-    throw new Error("Keep at least one ACWI security before saving the ETF.");
+    throw new EtfCreatorRequestError("Keep at least one source ETF security before saving the ETF.");
   }
   if (selectedSecurityIds.length > MAX_SELECTED_SECURITIES) {
-    throw new Error(`An ETF can contain up to ${MAX_SELECTED_SECURITIES} securities.`);
+    throw new EtfCreatorRequestError(`An ETF can contain up to ${MAX_SELECTED_SECURITIES} securities.`);
   }
 
   const criteria = validatedCriteria(draft.criteria);
-  const source = await getHoldingsSnapshot("ACWI");
+  let source;
+  try {
+    source = await getHoldingsSnapshot(sourceEtf.id);
+  } catch (error) {
+    throw new EtfCreatorUnavailableError(error);
+  }
   const sourceEquities = source.holdings.filter(
     (holding) => holding.assetClass === "Equity",
   );
@@ -100,29 +169,35 @@ export async function createEtfFromAcwi(
     selectedSet.has(holding.securityId),
   );
   if (selected.length !== selectedSecurityIds.length) {
-    throw new Error(
-      "The ACWI universe changed while the selection was open. Review the selection and try again.",
+    throw new EtfCreatorRequestError(
+      "The source ETF universe changed while the selection was open. Review the selection and try again.",
     );
   }
 
   const normalized = normalizeCreatorHoldings(selected);
   if (normalized.length === 0) {
-    throw new Error("The retained ACWI securities have no usable free-float weight.");
+    throw new EtfCreatorRequestError("The retained source securities have no usable free-float weight.");
   }
   const description = [
     customDescription,
-    `${normalized.length} ACWI constituents, frozen and normalized to 100% from ACWI free-float weights as of ${source.asOf}.`,
+    `${normalized.length} ${source.etf.ticker} constituents, frozen and normalized to 100% from source free-float weights as of ${source.asOf}.`,
     "The saved definition keeps these securities and weights unchanged.",
   ]
     .filter(Boolean)
     .join(" ");
 
-  return saveCreatedEtf({
-    ticker,
-    name,
-    description,
-    source,
-    selectedHoldings: normalized,
-    criteria,
-  });
+  try {
+    return saveCreatedEtf({
+      ticker,
+      name,
+      description,
+      source,
+      selectedHoldings: normalized,
+      criteria,
+    });
+  } catch (error) {
+    throw new EtfCreatorUnavailableError(error);
+  }
 }
+
+export const createEtfFromAcwi = createEtfFromSource;

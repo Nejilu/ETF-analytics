@@ -3,6 +3,7 @@ import {
   HoldingsUnavailableError,
 } from "@/data/services/holdings-service";
 import { securityQuoteAlias } from "@/domain/security-equivalence";
+import { cacheControlForSource } from "@/domain/http-cache";
 
 const MAX_RESULTS = 12;
 
@@ -79,7 +80,7 @@ export async function GET(request: Request) {
       },
       {
         headers: {
-          "Cache-Control": "private, max-age=60",
+          "Cache-Control": cacheControlForSource(acwi.sourceStatus, "private, max-age=60"),
         },
       },
     );
@@ -93,6 +94,9 @@ export async function GET(request: Request) {
         { status: 503, headers: { "Cache-Control": "no-store" } },
       );
     }
-    throw error;
+    return Response.json(
+      { error: "Security search failed." },
+      { status: 500, headers: { "Cache-Control": "no-store" } },
+    );
   }
 }

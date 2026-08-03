@@ -2,8 +2,19 @@ import { ensureLocalDatabase } from "@/db/bootstrap";
 import { getSqlite } from "@/db/client";
 
 export function GET() {
-  ensureLocalDatabase();
-  getSqlite().prepare("SELECT 1").get();
+  try {
+    ensureLocalDatabase();
+    getSqlite().prepare("SELECT 1").get();
+  } catch {
+    return Response.json(
+      {
+        status: "unhealthy",
+        service: "index-lens",
+        database: { status: "unavailable" },
+      },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
 
   return Response.json(
     {

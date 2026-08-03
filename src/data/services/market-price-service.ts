@@ -3,6 +3,7 @@ import "server-only";
 import YahooFinance from "yahoo-finance2";
 
 import { ensureLocalDatabase } from "@/db/bootstrap";
+import { databasePath } from "@/db/client";
 import {
   findEtfById,
   findSecuritiesByIds,
@@ -20,10 +21,20 @@ import type {
   PortfolioItem,
   PortfolioSecurity,
 } from "@/domain/portfolio";
+import {
+  MarketPriceRequestError,
+  MarketPriceUnavailableError,
+} from "@/domain/portfolio";
+import { mapWithConcurrency } from "@/domain/async-utils";
+import {
+  fxRateInFlightKey,
+  marketPriceInFlightKey,
+} from "@/domain/market-price-cache";
 import { valuePortfolioPositions } from "@/domain/processors/value-portfolio";
 import { securityQuoteAlias } from "@/domain/security-equivalence";
 
 const DEFAULT_TTL_SECONDS = 60 * 60 * 24;
+const DEFAULT_CONCURRENCY = 4;
 const yahooFinance = new YahooFinance();
 const inFlightPrices = new Map<string, Promise<MarketPrice>>();
 const inFlightFx = new Map<string, Promise<FxRate>>();
@@ -33,6 +44,13 @@ function ttlSeconds() {
   return Number.isFinite(configured) && configured > 0
     ? configured
     : DEFAULT_TTL_SECONDS;
+}
+
+function marketPriceConcurrency(): number {
+  const configured = Number(process.env.MARKET_PRICE_CONCURRENCY);
+  return Number.isInteger(configured) && configured >= 1 && configured <= 8
+    ? configured
+    : DEFAULT_CONCURRENCY;
 }
 
 function isFresh(fetchedAt: string): boolean {
@@ -161,12 +179,13 @@ async function getFxRate(currency: string): Promise<FxRate> {
     };
   }
 
-  const existing = inFlightFx.get(currency);
+  const key = fxRateInFlightKey(databasePath(), currency);
+  const existing = inFlightFx.get(key);
   if (existing) return existing;
   const request = refreshFxRate(currency).finally(() => {
-    inFlightFx.delete(currency);
+    inFlightFx.delete(key);
   });
-  inFlightFx.set(currency, request);
+  inFlightFx.set(key, request);
   return request;
 }
 
@@ -200,11 +219,15 @@ async function refreshMarketPrice(
         etf.fundType === "portfolio" ||
         etf.fundType === "custom"
       ) {
-        throw new Error("Only source ETFs can be priced as portfolio components.");
+        throw new MarketPriceRequestError(
+          "Only source ETFs can be priced as portfolio components.",
+        );
       }
       providerSymbol ??= etf.priceSymbol ?? etf.ticker;
     } else {
-      if (!security) throw new Error("The selected security is unavailable.");
+      if (!security) {
+        throw new MarketPriceRequestError("The selected security is unavailable.");
+      }
       providerSymbol ??= await resolveSecuritySymbol(security);
     }
 
@@ -238,6 +261,7 @@ async function refreshMarketPrice(
       sourceStatus: "live",
     });
   } catch (error) {
+    if (error instanceof MarketPriceRequestError) throw error;
     if (fallbackCached) {
       return { ...fallbackCached, sourceStatus: "stale" };
     }
@@ -249,12 +273,22 @@ export async function getMarketPrice(
   assetKind: PortfolioAssetKind,
   assetId: string,
 ): Promise<MarketPrice> {
-  const key = `${assetKind}:${assetId}`;
+  const key = marketPriceInFlightKey(databasePath(), assetKind, assetId);
   const existing = inFlightPrices.get(key);
   if (existing) return existing;
-  const request = refreshMarketPrice(assetKind, assetId).finally(() => {
-    inFlightPrices.delete(key);
-  });
+  const request = refreshMarketPrice(assetKind, assetId)
+    .catch((error) => {
+      if (
+        error instanceof MarketPriceRequestError ||
+        error instanceof MarketPriceUnavailableError
+      ) {
+        throw error;
+      }
+      throw new MarketPriceUnavailableError(error);
+    })
+    .finally(() => {
+      inFlightPrices.delete(key);
+    });
   inFlightPrices.set(key, request);
   return request;
 }
@@ -267,8 +301,10 @@ export async function getMarketPrices(
       assets.map((asset) => [`${asset.kind}:${asset.referenceId}`, asset]),
     ).values(),
   ];
-  const prices = await Promise.all(
-    unique.map((asset) => getMarketPrice(asset.kind, asset.referenceId)),
+  const prices = await mapWithConcurrency(
+    unique,
+    marketPriceConcurrency(),
+    (asset) => getMarketPrice(asset.kind, asset.referenceId),
   );
   return new Map(
     prices.map((price) => [

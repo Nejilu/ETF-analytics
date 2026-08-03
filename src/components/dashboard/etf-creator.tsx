@@ -102,15 +102,22 @@ export function EtfCreator({
   catalog,
   onCatalogChanged,
 }: EtfCreatorProps) {
+  const sourceEtfs = useMemo(
+    () => catalog.flatMap((group) => group.variants),
+    [catalog],
+  );
+  const defaultSourceEtfId =
+    sourceEtfs.find((etf) => etf.id === "acwi-us")?.id ?? sourceEtfs[0]?.id ?? "";
+  const [sourceEtfId, setSourceEtfId] = useState(defaultSourceEtfId);
   const overlapCatalog = useMemo(
     () =>
       catalog
         .map((group) => ({
           ...group,
-          variants: group.variants.filter((etf) => etf.id !== "acwi-us"),
+          variants: group.variants.filter((etf) => etf.id !== sourceEtfId),
         }))
         .filter((group) => group.variants.length > 0),
-    [catalog],
+    [catalog, sourceEtfId],
   );
   const overlapEtfs = useMemo(
     () => overlapCatalog.flatMap((group) => group.variants),
@@ -137,7 +144,7 @@ export function EtfCreator({
   );
   const [resultQuery, setResultQuery] = useState("");
   const [ticker, setTicker] = useState("");
-  const [name, setName] = useState("My Custom ACWI ETF");
+  const [name, setName] = useState("My Custom ETF");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedEtf, setSavedEtf] = useState<EtfShareClass | null>(null);
@@ -153,16 +160,19 @@ export function EtfCreator({
     void (async () => {
       setSourceLoading(true);
       try {
-        const response = await fetch("/api/v1/holdings/ACWI", {
+        const response = await fetch(
+          `/api/v1/holdings/${encodeURIComponent(sourceEtfId)}`,
+          {
           cache: "no-store",
           signal: controller.signal,
-        });
+          },
+        );
         const payload = (await response.json()) as {
           data?: HoldingsSnapshot;
           error?: string;
         };
         if (!response.ok || !payload.data) {
-          throw new Error(payload.error ?? "The ACWI universe is unavailable.");
+          throw new Error(payload.error ?? "The selected ETF universe is unavailable.");
         }
         setSource(payload.data);
       } catch (loadError) {
@@ -170,7 +180,7 @@ export function EtfCreator({
           setError(
             loadError instanceof Error
               ? loadError.message
-              : "The ACWI universe is unavailable.",
+              : "The selected ETF universe is unavailable.",
           );
         }
       } finally {
@@ -178,7 +188,7 @@ export function EtfCreator({
       }
     })();
     return () => controller.abort();
-  }, []);
+  }, [sourceEtfId]);
 
   useEffect(() => {
     if (overlapMode === "none" || !overlapEtfId) {
@@ -319,6 +329,25 @@ export function EtfCreator({
     setResultQuery("");
   };
 
+  const changeSourceEtf = (nextSourceEtfId: string) => {
+    setSourceEtfId(nextSourceEtfId);
+    if (nextSourceEtfId === overlapEtfId) {
+      const replacement = overlapEtfs.find(
+        (etf) => etf.id !== nextSourceEtfId,
+      );
+      setOverlapEtfId(replacement?.id ?? "");
+    }
+    setCountries([]);
+    setSectors([]);
+    setOverlapMode("none");
+    setOverlapSnapshot(null);
+    setOverlapLoading(false);
+    setManualExclusions(new Set());
+    setResultQuery("");
+    setSavedEtf(null);
+    setError(null);
+  };
+
   const save = async () => {
     if (overlapMode !== "none" && !overlapSnapshot) {
       setError("Wait for the overlap ETF holdings before saving.");
@@ -338,6 +367,7 @@ export function EtfCreator({
           selectedSecurityIds: selectedHoldings.map(
             (holding) => holding.securityId,
           ),
+          sourceEtfId,
           criteria,
         }),
       });
@@ -366,7 +396,7 @@ export function EtfCreator({
     return (
       <section className="panel creator-loading" aria-live="polite">
         <span className="spinner" />
-        Loading the ACWI creation universe…
+        Loading the selected ETF universe…
       </section>
     );
   }
@@ -378,13 +408,25 @@ export function EtfCreator({
           <span className="eyebrow">Rules-based construction</span>
           <h1>ETF Creator</h1>
           <p>
-            Start with ACWI, apply geography, sector and overlap rules, then
-            curate the remaining securities before freezing a synthetic ETF.
+            Start with any registered ETF, apply geography, sector and overlap
+            rules, then curate the remaining securities before freezing a
+            synthetic ETF.
           </p>
+          <div className="creator-source-selector">
+            <EtfSearch
+              catalog={catalog}
+              selectedId={sourceEtfId}
+              label="Base ETF universe"
+              onSelect={changeSourceEtf}
+            />
+            <small>
+              ACWI is selected by default as the general free-float universe.
+            </small>
+          </div>
         </div>
         <div className="creator-source-card">
           <span>Source universe</span>
-          <strong>{source?.etf.ticker ?? "ACWI"}</strong>
+          <strong>{source?.etf.ticker ?? "—"}</strong>
           <small>
             {source ? `${formatDate(source.asOf)} · ${source.cacheTtlHours}h cache` : "Unavailable"}
           </small>
@@ -402,7 +444,7 @@ export function EtfCreator({
             </div>
             <ToggleMode value={countryMode} onChange={setCountryMode} />
           </div>
-          <p>Choose countries to keep or remove from the ACWI universe.</p>
+          <p>Choose countries to keep or remove from the selected ETF universe.</p>
           <FilterOptions
             options={countriesOptions}
             selected={countries}
@@ -435,7 +477,7 @@ export function EtfCreator({
               <h2>ETF overlap</h2>
             </div>
           </div>
-          <p>Keep only, or remove, ACWI securities also held by another ETF.</p>
+          <p>Keep only, or remove, securities also held by another ETF.</p>
           <div className="creator-overlap-modes">
             {(["none", "include", "exclude"] as CreatorOverlapMode[]).map(
               (mode) => (
@@ -467,7 +509,7 @@ export function EtfCreator({
             />
           ) : (
             <div className="creator-no-overlap">
-              All ACWI securities pass this step.
+              All securities from the base ETF pass this step.
             </div>
           )}
           <div className="creator-overlap-status" aria-live="polite">
@@ -486,10 +528,10 @@ export function EtfCreator({
         <article>
           <span>Selected securities</span>
           <strong>{selectedHoldings.length}</strong>
-          <small>of {sourceEquities.length} ACWI equities</small>
+          <small>of {sourceEquities.length} base ETF equities</small>
         </article>
         <article>
-          <span>Original ACWI weight</span>
+          <span>Original source weight</span>
           <strong>{formatPercent(sourceWeight)}</strong>
           <small>before normalization</small>
         </article>
@@ -558,7 +600,7 @@ export function EtfCreator({
               <span>Keep</span>
               <span>Security</span>
               <span>Country / sector</span>
-              <span>ACWI</span>
+                <span>{source?.etf.ticker ?? "Source"}</span>
               <span>New weight</span>
             </div>
             {visibleHoldings.slice(0, 250).map((holding) => (
@@ -610,7 +652,8 @@ export function EtfCreator({
             <h2>Save to supported ETFs</h2>
             <p>
               The constituent list and normalized weights are frozen at save
-              time. Future ACWI changes will not alter this ETF.
+              time. Future changes in the selected source ETF will not alter
+              this ETF.
             </p>
           </div>
           <div className="creator-save-fields">
@@ -644,7 +687,7 @@ export function EtfCreator({
           <div className="creator-definition-summary">
             <span><b>{selectedHoldings.length}</b> frozen constituents</span>
             <span><b>100%</b> normalized weight</span>
-            <span><b>{source ? formatDate(source.asOf) : "—"}</b> ACWI snapshot</span>
+            <span><b>{source ? formatDate(source.asOf) : "—"}</b> {source?.etf.ticker ?? "Source"} snapshot</span>
           </div>
           <button
             className="primary-button creator-save-button"
@@ -657,7 +700,7 @@ export function EtfCreator({
           </button>
           {savedEtf ? (
             <div className="saved-etf-success">
-              {savedEtf.ticker} is now available in the supported ETF list with its frozen ACWI weights.
+              {savedEtf.ticker} is now available in the supported ETF list with its frozen source weights.
             </div>
           ) : null}
         </article>

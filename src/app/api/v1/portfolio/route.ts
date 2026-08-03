@@ -1,5 +1,7 @@
 import {
   getPortfolio,
+  PortfolioRequestError,
+  PortfolioUnavailableError,
   savePortfolio,
 } from "@/data/services/portfolio-service";
 import type {
@@ -15,12 +17,41 @@ interface PortfolioRequestItem {
   inputAmount: number;
 }
 
-export async function GET() {
-  const portfolio = await getPortfolio();
+function errorResponse(error: unknown, fallback: string): Response {
+  if (error instanceof SyntaxError) {
+    return Response.json(
+      { error: "Request body must be valid JSON." },
+      { status: 400, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  if (error instanceof PortfolioRequestError) {
+    return Response.json(
+      { error: error.message },
+      { status: 400, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  if (error instanceof PortfolioUnavailableError) {
+    return Response.json(
+      { error: error.message || fallback },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   return Response.json(
-    { data: portfolio },
-    { headers: { "Cache-Control": "no-store" } },
+    { error: fallback },
+    { status: 500, headers: { "Cache-Control": "no-store" } },
   );
+}
+
+export async function GET() {
+  try {
+    const portfolio = await getPortfolio();
+    return Response.json(
+      { data: portfolio },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  } catch (error) {
+    return errorResponse(error, "The portfolio could not be loaded.");
+  }
 }
 
 export async function PUT(request: Request) {
@@ -28,10 +59,10 @@ export async function PUT(request: Request) {
     const payload = (await request.json()) as {
       items?: PortfolioRequestItem[];
     };
-    if (!Array.isArray(payload.items)) {
+    if (!payload || typeof payload !== "object" || !Array.isArray(payload.items)) {
       return Response.json(
         { error: "The portfolio items array is required." },
-        { status: 400 },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
       );
     }
 
@@ -41,14 +72,6 @@ export async function PUT(request: Request) {
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
-    return Response.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "The portfolio could not be saved.",
-      },
-      { status: 400, headers: { "Cache-Control": "no-store" } },
-    );
+    return errorResponse(error, "The portfolio could not be saved.");
   }
 }

@@ -23,8 +23,13 @@ import type {
 } from "@/domain/portfolio";
 import { analyzePortfolio } from "@/domain/processors/analyze-portfolio";
 import { securityQuoteAlias } from "@/domain/security-equivalence";
+import { mapWithConcurrency } from "@/domain/async-utils";
 
-import { HoldingsUnavailableError, getHoldingsSnapshot } from "./holdings-service";
+import {
+  HoldingsUnavailableError,
+  getHoldingsSnapshot,
+  holdingsRefreshConcurrency,
+} from "./holdings-service";
 import {
   getMarketPrices,
   valuePortfolioItems,
@@ -40,31 +45,57 @@ interface PortfolioItemDraft {
 
 const MAX_PORTFOLIO_ITEMS = 50;
 
+export class PortfolioRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PortfolioRequestError";
+  }
+}
+
+export class PortfolioUnavailableError extends Error {
+  constructor(cause?: unknown) {
+    super(
+      cause instanceof Error
+        ? cause.message
+        : typeof cause === "string"
+          ? cause
+          : "Portfolio data is unavailable.",
+    );
+    this.name = "PortfolioUnavailableError";
+  }
+}
+
 function validateDrafts(drafts: PortfolioItemDraft[]) {
   if (drafts.length > MAX_PORTFOLIO_ITEMS) {
-    throw new Error(`A portfolio can contain up to ${MAX_PORTFOLIO_ITEMS} lines.`);
+    throw new PortfolioRequestError(`A portfolio can contain up to ${MAX_PORTFOLIO_ITEMS} lines.`);
   }
 
   const seen = new Set<string>();
   for (const draft of drafts) {
+    if (!draft || typeof draft !== "object") {
+      throw new PortfolioRequestError("Every portfolio line must be an object.");
+    }
+    if (typeof draft.id !== "string" || typeof draft.referenceId !== "string") {
+      throw new PortfolioRequestError("Every portfolio line must have a valid id and asset reference.");
+    }
     if (!draft.id || !/^[a-zA-Z0-9_-]{1,80}$/.test(draft.id)) {
-      throw new Error("Every portfolio line must have a valid id.");
+      throw new PortfolioRequestError("Every portfolio line must have a valid id.");
     }
     if (draft.kind !== "etf" && draft.kind !== "security") {
-      throw new Error("Unsupported portfolio asset type.");
+      throw new PortfolioRequestError("Unsupported portfolio asset type.");
     }
     if (!draft.referenceId || draft.referenceId.length > 100) {
-      throw new Error("Every portfolio line must reference an asset.");
+      throw new PortfolioRequestError("Every portfolio line must reference an asset.");
     }
     if (draft.inputMode !== "value" && draft.inputMode !== "shares") {
-      throw new Error("Every line must use value or shares as its input mode.");
+      throw new PortfolioRequestError("Every line must use value or shares as its input mode.");
     }
     if (!Number.isFinite(draft.inputAmount) || draft.inputAmount <= 0) {
-      throw new Error("Every position amount must be greater than zero.");
+      throw new PortfolioRequestError("Every position amount must be greater than zero.");
     }
     const key = `${draft.kind}:${draft.referenceId}`;
     if (seen.has(key)) {
-      throw new Error("Duplicate portfolio lines are not allowed.");
+      throw new PortfolioRequestError("Duplicate portfolio lines are not allowed.");
     }
     seen.add(key);
   }
@@ -86,7 +117,7 @@ async function resolveDrafts(
         etf.fundType === "portfolio" ||
         etf.fundType === "custom"
       ) {
-        throw new Error("One of the selected ETFs is no longer available.");
+        throw new PortfolioRequestError("One of the selected ETFs is no longer available.");
       }
       return {
         ...draft,
@@ -98,7 +129,7 @@ async function resolveDrafts(
 
     const security = directSecurities.get(draft.referenceId);
     if (!security) {
-      throw new Error("One of the selected ACWI securities is no longer available.");
+      throw new PortfolioRequestError("One of the selected ACWI securities is no longer available.");
     }
     const alias = securityQuoteAlias(security);
     return {
@@ -108,18 +139,23 @@ async function resolveDrafts(
       allocationWeight: 0,
     };
   });
-  const prices = await getMarketPrices(
-    resolved.map((item) => ({
-      kind: item.kind,
-      referenceId: item.referenceId,
-    })),
-  );
+  let prices;
+  try {
+    prices = await getMarketPrices(
+      resolved.map((item) => ({
+        kind: item.kind,
+        referenceId: item.referenceId,
+      })),
+    );
+  } catch (error) {
+    throw new PortfolioUnavailableError(error);
+  }
   const withQuantities = resolved.map((item) => {
     const price = prices.get(`${item.kind}:${item.referenceId}`);
-    if (!price) throw new Error(`Price for ${item.ticker} is unavailable.`);
+    if (!price) throw new PortfolioUnavailableError(`Price for ${item.ticker} is unavailable.`);
     const inputAmount = Number(item.inputAmount);
     if (!Number.isFinite(inputAmount) || inputAmount <= 0) {
-      throw new Error(`A valid amount is required for ${item.ticker}.`);
+      throw new PortfolioRequestError(`A valid amount is required for ${item.ticker}.`);
     }
     const quantity =
       item.inputMode === "shares"
@@ -134,7 +170,11 @@ async function resolveDrafts(
       priceCurrency: price.currency,
     };
   });
-  return (await valuePortfolioItems(withQuantities)).items;
+  try {
+    return (await valuePortfolioItems(withQuantities)).items;
+  } catch (error) {
+    throw new PortfolioUnavailableError(error);
+  }
 }
 
 async function buildAnalysis(
@@ -143,8 +183,10 @@ async function buildAnalysis(
   if (items.length === 0) return null;
 
   const etfItems = items.filter((item) => item.kind === "etf");
-  const snapshots = await Promise.all(
-    etfItems.map((item) => getHoldingsSnapshot(item.referenceId)),
+  const snapshots = await mapWithConcurrency(
+    etfItems,
+    holdingsRefreshConcurrency(),
+    (item) => getHoldingsSnapshot(item.referenceId),
   );
   const securityIds = items
     .filter((item) => item.kind === "security")
@@ -209,18 +251,32 @@ async function recordWithAnalysis(
 }
 
 export async function getPortfolio(): Promise<PortfolioRecord> {
-  ensureLocalDatabase();
-  return recordWithAnalysis(loadDefaultPortfolio());
+  try {
+    ensureLocalDatabase();
+    return await recordWithAnalysis(loadDefaultPortfolio());
+  } catch (error) {
+    throw new PortfolioUnavailableError(error);
+  }
 }
 
 export async function savePortfolio(
   drafts: PortfolioItemDraft[],
 ): Promise<PortfolioRecord> {
-  ensureLocalDatabase();
+  try {
+    ensureLocalDatabase();
+  } catch (error) {
+    throw new PortfolioUnavailableError(error);
+  }
   validateDrafts(drafts);
-  const items = await resolveDrafts(drafts);
-  replaceDefaultPortfolioItems(items);
-  return recordWithAnalysis(loadDefaultPortfolio());
+  let items: PortfolioItem[];
+  try {
+    items = await resolveDrafts(drafts);
+    replaceDefaultPortfolioItems(items);
+    return await recordWithAnalysis(loadDefaultPortfolio());
+  } catch (error) {
+    if (error instanceof PortfolioRequestError) throw error;
+    throw new PortfolioUnavailableError(error);
+  }
 }
 
 interface SavePortfolioEtfDraft {
@@ -232,50 +288,76 @@ interface SavePortfolioEtfDraft {
 export async function savePortfolioAsEtf(
   draft: SavePortfolioEtfDraft,
 ): Promise<EtfShareClass> {
-  ensureLocalDatabase();
+  try {
+    ensureLocalDatabase();
+  } catch (error) {
+    throw new PortfolioUnavailableError(error);
+  }
   const ticker = draft.ticker.trim().toUpperCase();
   const name = draft.name.trim();
   const customDescription = draft.description?.trim();
 
   if (!/^[A-Z][A-Z0-9.-]{1,9}$/.test(ticker)) {
-    throw new Error(
+    throw new PortfolioRequestError(
       "Use a ticker of 2 to 10 letters, numbers, dots or hyphens.",
     );
   }
   if (name.length < 3 || name.length > 80) {
-    throw new Error("The ETF name must contain between 3 and 80 characters.");
+    throw new PortfolioRequestError("The ETF name must contain between 3 and 80 characters.");
   }
   if (customDescription && customDescription.length > 240) {
-    throw new Error("The description cannot exceed 240 characters.");
+    throw new PortfolioRequestError("The description cannot exceed 240 characters.");
   }
-  if (findEtfByTicker(ticker)) {
-    throw new Error(`Ticker ${ticker} is already used.`);
+  try {
+    if (findEtfByTicker(ticker)) {
+      throw new PortfolioRequestError(`Ticker ${ticker} is already used.`);
+    }
+  } catch (error) {
+    if (error instanceof PortfolioRequestError) throw error;
+    throw new PortfolioUnavailableError(error);
   }
 
-  const stored = loadDefaultPortfolio();
-  const portfolio = {
-    ...stored,
-    ...(await valuePortfolioItems(stored.items)),
-  };
+  let stored: StoredPortfolio;
+  try {
+    stored = loadDefaultPortfolio();
+  } catch (error) {
+    throw new PortfolioUnavailableError(error);
+  }
+  let valuedPortfolio;
+  try {
+    valuedPortfolio = await valuePortfolioItems(stored.items);
+  } catch (error) {
+    throw new PortfolioUnavailableError(error);
+  }
+  const portfolio = { ...stored, ...valuedPortfolio };
   if (stored.items.some((item) => !item.quantity)) {
-    anchorPortfolioQuantities(stored.id, portfolio.items);
+    try {
+      anchorPortfolioQuantities(stored.id, portfolio.items);
+    } catch (error) {
+      throw new PortfolioUnavailableError(error);
+    }
   }
   if (portfolio.items.length === 0) {
-    throw new Error("Add portfolio positions before saving it as an ETF.");
+    throw new PortfolioRequestError("Add portfolio positions before saving it as an ETF.");
   }
 
   for (const item of portfolio.items) {
     if (!item.quantity || item.quantity <= 0) {
-      throw new Error(`A valid share quantity is required for ${item.ticker}.`);
+      throw new PortfolioRequestError(`A valid share quantity is required for ${item.ticker}.`);
     }
     if (item.kind !== "etf") continue;
-    const component = findEtfById(item.referenceId);
+    let component;
+    try {
+      component = findEtfById(item.referenceId);
+    } catch (error) {
+      throw new PortfolioUnavailableError(error);
+    }
     if (
       !component ||
       component.fundType === "portfolio" ||
       component.fundType === "custom"
     ) {
-      throw new Error(
+      throw new PortfolioRequestError(
         "Saved portfolio ETFs cannot contain another synthetic portfolio ETF.",
       );
     }
@@ -297,5 +379,9 @@ export async function savePortfolioAsEtf(
     .filter(Boolean)
     .join(" ");
 
-  return saveDefaultPortfolioAsEtf({ ticker, name, description });
+  try {
+    return saveDefaultPortfolioAsEtf({ ticker, name, description });
+  } catch (error) {
+    throw new PortfolioUnavailableError(error);
+  }
 }

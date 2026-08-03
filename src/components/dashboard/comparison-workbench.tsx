@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   Bar,
   BarChart,
@@ -16,7 +17,6 @@ import {
 
 import { PortfolioAnalytics } from "@/components/dashboard/portfolio-analytics";
 import { EtfCreator } from "@/components/dashboard/etf-creator";
-import { MetricsOverview } from "@/components/dashboard/metrics-overview";
 import type {
   CatalogGroup,
   ComparisonResult,
@@ -26,6 +26,14 @@ import type {
   SleevePosition,
 } from "@/domain/etf";
 import { EtfSearch } from "./etf-search";
+
+const MetricsOverview = dynamic(
+  () => import("@/components/dashboard/metrics-overview").then((module) => module.MetricsOverview),
+  {
+    ssr: false,
+    loading: () => <section className="metrics-loading panel"><span className="spinner" /><strong>Loading metrics workspace…</strong></section>,
+  },
+);
 
 interface ComparisonWorkbenchProps {
   catalog: CatalogGroup[];
@@ -51,7 +59,7 @@ function formatDate(value: string) {
 
 function wrapperLabel(etf: EtfShareClass) {
   if (etf.fundType === "portfolio") return "Portfolio ETF";
-  if (etf.fundType === "custom") return "Custom ACWI ETF";
+  if (etf.fundType === "custom") return "Custom ETF";
   if (etf.wrapper === "SYNTHETIC") return "Synthetic UCITS";
   return etf.wrapper === "UCITS" ? "UCITS" : "US";
 }
@@ -829,7 +837,7 @@ export function ComparisonWorkbench({
               {workspaceView === "portfolio"
                 ? "Local portfolio"
                 : workspaceView === "creator"
-                  ? "ACWI universe"
+                  ? "Selected ETF universe"
                 : workspaceView === "metrics"
                   ? "TradingView"
                 : error

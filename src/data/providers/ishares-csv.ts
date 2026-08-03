@@ -1,8 +1,29 @@
 import type { Holding } from "@/domain/etf";
 
+// Bump this prefix whenever the normalization changes in a way that must be
+// re-applied to snapshots already persisted from the same provider payload.
+export const ISHARES_HOLDINGS_HASH_PREFIX = "ishares-holdings-v2:";
+
 interface ParsedHoldingsFile {
   asOf: string;
   holdings: Holding[];
+}
+
+interface BlackrockDataPoint {
+  value?: unknown;
+  formattedValue?: unknown;
+}
+
+interface BlackrockHoldingsResponse {
+  componentsByNameMap?: {
+    holdings?: {
+      containersByNameMap?: {
+        all?: {
+          dataPointsByNameMap?: Record<string, BlackrockDataPoint>;
+        };
+      };
+    };
+  };
 }
 
 function parseCsv(text: string): string[][] {
@@ -41,8 +62,11 @@ function parseCsv(text: string): string[][] {
   return rows;
 }
 
-function toNumber(value: string | undefined): number {
-  if (!value) return 0;
+function toNumber(value: unknown): number {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : 0;
+  }
+  if (typeof value !== "string" || !value) return 0;
   const normalized = value.replace(/[%,$\s]/g, "").replace(/,/g, "");
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -57,6 +81,29 @@ function findColumn(headers: string[], candidates: string[]) {
 
 function valueAt(row: string[], index: number, fallback = "") {
   return index >= 0 ? row[index] || fallback : fallback;
+}
+
+function blackrockValueAt(
+  values: unknown[] | undefined,
+  index: number,
+  fallback = "",
+): string {
+  const value = values?.[index];
+  return value === null || value === undefined || value === ""
+    ? fallback
+    : String(value);
+}
+
+function fallbackSecurityId(name: string, ticker: string): string {
+  const normalizedName = name.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const normalizedTicker = ticker.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  // A name-only key can merge separate share classes when an iShares export
+  // omits ISIN (for example Lindt's LISN/LISP lines). Keep the old stable
+  // fallback for rows without a meaningful ticker, but include the ticker
+  // whenever it can disambiguate the security.
+  return normalizedTicker && normalizedTicker !== "CASH"
+    ? `NAME:${normalizedName}:${normalizedTicker}`
+    : `NAME:${normalizedName}`;
 }
 
 function parseDate(rows: string[][]): string {
@@ -93,7 +140,112 @@ function parseDate(rows: string[][]): string {
     : parsed.toISOString().slice(0, 10);
 }
 
+function parseBlackrockDate(value: unknown): string {
+  const raw = String(value ?? "");
+  if (/^\d{8}$/.test(raw)) {
+    return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+  }
+  return parseDate([["Fund Holdings as of", raw]]);
+}
+
+function deduplicateHoldings(parsedHoldings: Holding[]): Holding[] {
+  const holdingsBySecurity = new Map<string, Holding>();
+  for (const holding of parsedHoldings) {
+    const existing = holdingsBySecurity.get(holding.securityId);
+    if (!existing) {
+      holdingsBySecurity.set(holding.securityId, holding);
+      continue;
+    }
+
+    existing.weight += holding.weight;
+    if (holding.marketValue !== undefined) {
+      existing.marketValue =
+        (existing.marketValue ?? 0) + holding.marketValue;
+    }
+  }
+  return [...holdingsBySecurity.values()];
+}
+
+function parseBlackrockProductData(raw: string): ParsedHoldingsFile {
+  let parsed: BlackrockHoldingsResponse;
+  try {
+    parsed = JSON.parse(raw) as BlackrockHoldingsResponse;
+  } catch {
+    throw new Error("Unable to parse the BlackRock holdings response.");
+  }
+
+  const dataPoints =
+    parsed.componentsByNameMap?.holdings?.containersByNameMap?.all
+      ?.dataPointsByNameMap;
+  const arrayValue = (name: string): unknown[] | undefined => {
+    const value = dataPoints?.[name]?.value;
+    return Array.isArray(value) ? value : undefined;
+  };
+  const tickers = arrayValue("ticker");
+  const names = arrayValue("issueName");
+  const weights = arrayValue("holdingPercent");
+  if (!tickers || !names || !weights) {
+    throw new Error("The BlackRock holdings response contains no holdings.");
+  }
+
+  const sectors = arrayValue("sectorName");
+  const assetClasses = arrayValue("assetClass");
+  const countries = arrayValue("countryOfRisk");
+  const isins = arrayValue("isin");
+  const currencies = arrayValue("currencyCode");
+  const marketCurrencies = arrayValue("marketCurrencyCode");
+  const exchanges = arrayValue("exchange");
+  const marketValues = arrayValue("marketValue");
+  const rowCount = Math.max(tickers.length, names.length, weights.length);
+
+  const parsedHoldings = Array.from(
+    { length: rowCount },
+    (_, index): Holding | null => {
+      const name = blackrockValueAt(names, index);
+      const ticker = blackrockValueAt(tickers, index, "—");
+      const weight = toNumber(weights[index]);
+      const marketValue = toNumber(marketValues?.[index]);
+      const isin = blackrockValueAt(isins, index);
+      if (!name || (weight <= 0 && marketValue <= 0)) return null;
+
+      return {
+        securityId: isin || fallbackSecurityId(name, ticker),
+        ticker,
+        name,
+        sector: blackrockValueAt(sectors, index, "Unclassified"),
+        assetClass: blackrockValueAt(assetClasses, index, "Unclassified"),
+        country: blackrockValueAt(countries, index, "Not reported"),
+        isin: isin || undefined,
+        weight,
+        marketValue: marketValue || undefined,
+        currency:
+          blackrockValueAt(currencies, index) ||
+          blackrockValueAt(marketCurrencies, index) ||
+          undefined,
+        exchange: blackrockValueAt(exchanges, index) || undefined,
+      };
+    },
+  ).filter((holding): holding is Holding => holding !== null);
+
+  const holdings = deduplicateHoldings(parsedHoldings);
+  if (holdings.length < 5) {
+    throw new Error(
+      "The BlackRock holdings response does not contain enough holdings.",
+    );
+  }
+
+  const asOf = dataPoints?.asOfDate?.value;
+  if (asOf === undefined || asOf === null) {
+    throw new Error("The BlackRock holdings response has no as-of date.");
+  }
+  return { asOf: parseBlackrockDate(asOf), holdings };
+}
+
 export function parseIsharesHoldingsCsv(raw: string): ParsedHoldingsFile {
+  if (raw.trimStart().startsWith("{")) {
+    return parseBlackrockProductData(raw);
+  }
+
   const rows = parseCsv(raw.replace(/^\uFEFF/, ""));
   const headerIndex = rows.findIndex(
     (row) =>
@@ -129,7 +281,7 @@ export function parseIsharesHoldingsCsv(raw: string): ParsedHoldingsFile {
 
       return {
         securityId:
-          isin || `NAME:${name.toUpperCase().replace(/[^A-Z0-9]/g, "")}`,
+          isin || fallbackSecurityId(name, ticker),
         ticker,
         name,
         sector: valueAt(row, sectorIndex, "Unclassified"),
@@ -144,21 +296,7 @@ export function parseIsharesHoldingsCsv(raw: string): ParsedHoldingsFile {
     })
     .filter((holding): holding is Holding => holding !== null);
 
-  const holdingsBySecurity = new Map<string, Holding>();
-  for (const holding of parsedHoldings) {
-    const existing = holdingsBySecurity.get(holding.securityId);
-    if (!existing) {
-      holdingsBySecurity.set(holding.securityId, holding);
-      continue;
-    }
-
-    existing.weight += holding.weight;
-    if (holding.marketValue !== undefined) {
-      existing.marketValue =
-        (existing.marketValue ?? 0) + holding.marketValue;
-    }
-  }
-  const holdings = [...holdingsBySecurity.values()];
+  const holdings = deduplicateHoldings(parsedHoldings);
 
   if (holdings.length < 5) {
     throw new Error("The iShares file does not contain enough holdings.");

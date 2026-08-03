@@ -103,6 +103,33 @@ export const securityProviderSymbols = sqliteTable(
   ],
 );
 
+export const providerNegativeCache = sqliteTable(
+  "provider_negative_cache",
+  {
+    provider: text("provider").notNull(),
+    cacheKind: text("cache_kind").notNull(),
+    providerSymbol: text("provider_symbol").notNull(),
+    metricKey: text("metric_key").notNull().default(""),
+    expiresAt: integer("expires_at").notNull(),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.provider,
+        table.cacheKind,
+        table.providerSymbol,
+        table.metricKey,
+      ],
+    }),
+    index("provider_negative_cache_expiry_idx").on(table.expiresAt),
+    index("provider_negative_cache_symbol_idx").on(
+      table.provider,
+      table.providerSymbol,
+    ),
+  ],
+);
+
 export const holdingSnapshots = sqliteTable(
   "holding_snapshots",
   {
@@ -265,5 +292,11 @@ export const metricObservations = sqliteTable(
       table.asOf,
     ),
     index("metric_observations_entity_idx").on(table.entityType, table.entityId),
+    index("metric_observations_latest_idx").on(
+      table.metricDefinitionId,
+      table.entityType,
+      table.entityId,
+      table.capturedAt,
+    ),
   ],
 );

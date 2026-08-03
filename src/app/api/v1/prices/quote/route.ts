@@ -1,5 +1,10 @@
 import { getMarketPrice } from "@/data/services/market-price-service";
-import type { PortfolioAssetKind } from "@/domain/portfolio";
+import {
+  MarketPriceRequestError,
+  MarketPriceUnavailableError,
+  type PortfolioAssetKind,
+} from "@/domain/portfolio";
+import { cacheControlForSource } from "@/domain/http-cache";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -12,7 +17,7 @@ export async function GET(request: Request) {
   ) {
     return Response.json(
       { error: "A valid asset kind and reference id are required." },
-      { status: 400 },
+      { status: 400, headers: { "Cache-Control": "no-store" } },
     );
   }
 
@@ -22,19 +27,26 @@ export async function GET(request: Request) {
       { data: price },
       {
         headers: {
-          "Cache-Control": "private, max-age=60",
+          "Cache-Control": cacheControlForSource(price.sourceStatus, "private, max-age=60"),
         },
       },
     );
   } catch (error) {
+    if (error instanceof MarketPriceRequestError) {
+      return Response.json(
+        { error: error.message },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    if (error instanceof MarketPriceUnavailableError) {
+      return Response.json(
+        { error: error.message || "The market price is unavailable." },
+        { status: 503, headers: { "Cache-Control": "no-store" } },
+      );
+    }
     return Response.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "The market price is unavailable.",
-      },
-      { status: 503, headers: { "Cache-Control": "no-store" } },
+      { error: "The market price could not be loaded." },
+      { status: 500, headers: { "Cache-Control": "no-store" } },
     );
   }
 }

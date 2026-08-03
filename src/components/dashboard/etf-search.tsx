@@ -21,7 +21,7 @@ function selectedLabel(etf: EtfShareClass | undefined): string {
 
 function wrapperLabel(etf: EtfShareClass): string {
   if (etf.fundType === "portfolio") return "Portfolio ETF";
-  if (etf.fundType === "custom") return "Custom ACWI ETF";
+  if (etf.fundType === "custom") return "Custom ETF";
   if (etf.exposureMultiplier) return `${etf.exposureMultiplier}× daily`;
   if (etf.wrapper === "SYNTHETIC") return "Synthetic UCITS";
   return etf.wrapper === "UCITS" ? "UCITS" : "US";

@@ -1,7 +1,10 @@
 import {
   getMetricsOverview,
+  MetricsOverviewRequestError,
   MetricsOverviewUnavailableError,
 } from "@/data/services/metrics-overview-service";
+import { metricsOverviewHttpResponse } from "./etag";
+import { metricsOverviewErrorStatus } from "./error-status";
 
 export async function GET(request: Request) {
   const references = new URL(request.url).searchParams
@@ -11,24 +14,24 @@ export async function GET(request: Request) {
     .filter(Boolean) ?? [];
   try {
     const result = await getMetricsOverview(references);
-    return Response.json(
-      { data: result },
-      {
-        headers: {
-          "Cache-Control": result.sourceStatus === "stale"
-            ? "no-store"
-            : "public, max-age=300, s-maxage=3600, stale-while-revalidate=3600",
-        },
-      },
+    return metricsOverviewHttpResponse(
+      result,
+      request.headers.get("if-none-match"),
     );
   } catch (error) {
     const unavailable = error instanceof MetricsOverviewUnavailableError;
+    const invalidRequest = error instanceof MetricsOverviewRequestError;
+    const status = metricsOverviewErrorStatus(unavailable, invalidRequest);
     return Response.json(
       {
-        error: error instanceof Error ? error.message : "Metrics are unavailable.",
+        error: status === 500
+          ? "Metrics overview failed."
+          : error instanceof Error
+            ? error.message
+            : "Metrics are unavailable.",
       },
       {
-        status: unavailable ? 503 : 400,
+        status,
         headers: { "Cache-Control": "no-store" },
       },
     );

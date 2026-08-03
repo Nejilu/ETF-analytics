@@ -46,13 +46,22 @@ export function saveCreatedEtf(input: SaveCreatedEtfInput): EtfShareClass {
       .insert(benchmarks)
       .values({
         id: "created-etfs",
-        name: "Custom ACWI ETFs",
+        name: "Custom ETFs",
         provider: "IndexLens",
-        region: "ACWI custom universe",
+        region: "Custom ETF universes",
         description:
-          "User-created, free-float-weighted selections frozen from an ACWI snapshot.",
+          "User-created, free-float-weighted selections frozen from a supported ETF snapshot.",
       })
-      .onConflictDoNothing()
+      .onConflictDoUpdate({
+        target: benchmarks.id,
+        set: {
+          name: "Custom ETFs",
+          region: "Custom ETF universes",
+          description:
+            "User-created, free-float-weighted selections frozen from a supported ETF snapshot.",
+          updatedAt: sql`CURRENT_TIMESTAMP`,
+        },
+      })
       .run();
 
     transaction
@@ -78,7 +87,7 @@ export function saveCreatedEtf(input: SaveCreatedEtfInput): EtfShareClass {
         description: input.description,
         active: true,
         metadataJson: {
-          compositionModel: "frozen-acwi-free-float",
+          compositionModel: "frozen-source-free-float",
           sourceEtfId: input.source.etf.id,
           sourceTicker: input.source.etf.ticker,
           sourceAsOf: input.source.asOf,

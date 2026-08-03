@@ -54,3 +54,82 @@ test("retains the listing exchange used by provider symbol resolution", () => {
   assert.equal(parsed.holdings[0].exchange, "NASDAQ");
   assert.equal(parsed.holdings[2].exchange, "New York Stock Exchange");
 });
+
+test("keeps no-ISIN share classes separate with a ticker fallback", () => {
+  const parsed = parseIsharesHoldingsCsv(
+    [
+      'Fund Holdings as of,"Jul 30, 2026"',
+      "Ticker,Name,Sector,Asset Class,Weight (%),Market Value,Location,Exchange,ISIN",
+      "LISN,CHOCOLADEFABRIKEN LINDT & SPRUENGLI,Consumer Staples,Equity,30,300,Switzerland,SIX Swiss Exchange,",
+      "LISP,CHOCOLADEFABRIKEN LINDT & SPRUENGLI,Consumer Staples,Equity,20,200,Switzerland,SIX Swiss Exchange,",
+      "ONE,One,Technology,Equity,20,200,United States,NASDAQ,",
+      "TWO,Two,Technology,Equity,15,150,United States,NASDAQ,",
+      "THREE,Three,Technology,Equity,15,150,United States,NASDAQ,",
+    ].join("\n"),
+  );
+
+  const classes = parsed.holdings.filter((holding) => holding.name.includes("LINDT"));
+  assert.equal(classes.length, 2);
+  assert.notEqual(classes[0]?.securityId, classes[1]?.securityId);
+  assert.deepEqual(classes.map((holding) => holding.weight).sort((a, b) => b - a), [30, 20]);
+});
+
+test("parses the current BlackRock product-data holdings response", () => {
+  const parsed = parseIsharesHoldingsCsv(
+    JSON.stringify({
+      componentsByNameMap: {
+        holdings: {
+          containersByNameMap: {
+            all: {
+              dataPointsByNameMap: {
+                asOfDate: { value: 20260731 },
+                ticker: { value: ["NVDA", "AAPL", "MSFT", "AMZN", "META"] },
+                issueName: {
+                  value: [
+                    "NVIDIA CORP",
+                    "APPLE INC",
+                    "MICROSOFT CORP",
+                    "AMAZON COM INC",
+                    "META PLATFORMS INC CLASS A",
+                  ],
+                },
+                sectorName: {
+                  value: [
+                    "Information Technology",
+                    "Information Technology",
+                    "Information Technology",
+                    "Consumer Discretionary",
+                    "Communication",
+                  ],
+                },
+                assetClass: { value: ["Equity", "Equity", "Equity", "Equity", "Equity"] },
+                countryOfRisk: {
+                  value: ["United States", "United States", "United States", "United States", "United States"],
+                },
+                isin: {
+                  value: [
+                    "US67066G1040",
+                    "US0378331005",
+                    "US5949181045",
+                    "US0231351067",
+                    "US30303M1027",
+                  ],
+                },
+                currencyCode: { value: ["USD", "USD", "USD", "USD", "USD"] },
+                exchange: { value: ["NASDAQ", "NASDAQ", "NASDAQ", "NASDAQ", "NASDAQ"] },
+                holdingPercent: { value: [7.5, 7, 5.3, 3.8, 3.2] },
+                marketValue: { value: [750, 700, 530, 380, 320] },
+              },
+            },
+          },
+        },
+      },
+    }),
+  );
+
+  assert.equal(parsed.asOf, "2026-07-31");
+  assert.equal(parsed.holdings.length, 5);
+  assert.equal(parsed.holdings[0]?.ticker, "NVDA");
+  assert.equal(parsed.holdings[0]?.exchange, "NASDAQ");
+  assert.equal(parsed.holdings[0]?.marketValue, 750);
+});

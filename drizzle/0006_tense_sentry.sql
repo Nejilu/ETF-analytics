@@ -1,0 +1,1 @@
+CREATE INDEX `metric_observations_latest_idx` ON `metric_observations` (`metric_definition_id`,`entity_type`,`entity_id`,`captured_at`);

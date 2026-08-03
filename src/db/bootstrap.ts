@@ -1,11 +1,13 @@
 import { migrateDatabase } from "./migrate";
 import { seedCatalog } from "./seed";
+import { databasePath, isDatabaseOpen } from "./client";
 
-let ready = false;
+let readyPath: string | undefined;
 
 export function ensureLocalDatabase(): void {
-  if (ready) return;
+  const path = databasePath();
+  if (readyPath === path && isDatabaseOpen()) return;
   migrateDatabase();
   seedCatalog();
-  ready = true;
+  readyPath = path;
 }

@@ -1,4 +1,4 @@
-import type { MetricKey, SecurityEstimateSeries } from "@/domain/metrics";
+import { DERIVED_METRIC_KEYS, type MetricKey, type SecurityEstimateSeries } from "@/domain/metrics";
 
 const WINDOW_KEYS = [
   "pe_estimate_window_0",
@@ -33,4 +33,19 @@ export function deriveEstimateSeriesMetrics(
     values.eps_growth_estimate_forward_4q = (forward / historical - 1) * 100;
   }
   return values;
+}
+
+/**
+ * A fresh consensus series is authoritative for derived EPS/P-E fields. If a
+ * new series makes one of those fields undefined (for example, a non-positive
+ * four-quarter EPS sum), remove the prior cached value instead of carrying it
+ * forward with a misleading timestamp.
+ */
+export function replaceDerivedMetrics(
+  values: Partial<Record<MetricKey, number>>,
+  derived: Partial<Record<MetricKey, number>>,
+): Partial<Record<MetricKey, number>> {
+  const result = { ...values };
+  for (const key of DERIVED_METRIC_KEYS) delete result[key];
+  return { ...result, ...derived };
 }

@@ -1,31 +1,49 @@
-import { createEtfFromAcwi } from "@/data/services/etf-creator-service";
+import {
+  createEtfFromSource,
+  EtfCreatorRequestError,
+  EtfCreatorUnavailableError,
+} from "@/data/services/etf-creator-service";
 import type { EtfCreatorCriteria } from "@/domain/etf-creator";
 
 export async function POST(request: Request) {
   try {
-    const payload = (await request.json()) as {
+    const rawPayload = await request.json();
+    if (!rawPayload || typeof rawPayload !== "object" || Array.isArray(rawPayload)) {
+      return Response.json(
+        { error: "Ticker, base ETF, ETF name, criteria and holdings are required." },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    const payload = rawPayload as {
       ticker?: string;
       name?: string;
       description?: string;
       selectedSecurityIds?: string[];
+      sourceEtfId?: string;
       criteria?: EtfCreatorCriteria;
     };
     if (
       typeof payload.ticker !== "string" ||
       typeof payload.name !== "string" ||
+      typeof payload.sourceEtfId !== "string" ||
       !Array.isArray(payload.selectedSecurityIds) ||
-      !payload.criteria
+      payload.selectedSecurityIds.some((id) => typeof id !== "string") ||
+      !payload.criteria ||
+      typeof payload.criteria !== "object" ||
+      Array.isArray(payload.criteria) ||
+      (payload.description !== undefined && typeof payload.description !== "string")
     ) {
       return Response.json(
-        { error: "Ticker, ETF name, criteria and holdings are required." },
-        { status: 400 },
+        { error: "Ticker, base ETF, ETF name, criteria and holdings are required." },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
       );
     }
 
-    const etf = await createEtfFromAcwi({
+    const etf = await createEtfFromSource({
       ticker: payload.ticker,
       name: payload.name,
       description: payload.description,
+      sourceEtfId: payload.sourceEtfId,
       selectedSecurityIds: payload.selectedSecurityIds,
       criteria: payload.criteria,
     });
@@ -34,14 +52,29 @@ export async function POST(request: Request) {
       { status: 201, headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
+    if (error instanceof SyntaxError) {
+      return Response.json(
+        { error: "Request body must be valid JSON." },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    if (error instanceof EtfCreatorRequestError) {
+      return Response.json(
+        { error: error.message },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    if (error instanceof EtfCreatorUnavailableError) {
+      return Response.json(
+        { error: error.message || "The selected ETF source data is unavailable." },
+        { status: 503, headers: { "Cache-Control": "no-store" } },
+      );
+    }
     return Response.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "The custom ETF could not be saved.",
+        error: "The custom ETF could not be saved.",
       },
-      { status: 400, headers: { "Cache-Control": "no-store" } },
+      { status: 500, headers: { "Cache-Control": "no-store" } },
     );
   }
 }

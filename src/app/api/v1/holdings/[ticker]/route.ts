@@ -10,9 +10,28 @@ export async function GET(
   context: { params: Promise<{ ticker: string }> },
 ) {
   const { ticker } = await context.params;
-  ensureLocalDatabase();
-  if (!findEtfByReference(ticker)) {
-    return Response.json({ error: "Unsupported ETF." }, { status: 404 });
+  try {
+    ensureLocalDatabase();
+  } catch {
+    return Response.json(
+      { error: "Holdings data is temporarily unavailable." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  let etf: ReturnType<typeof findEtfByReference>;
+  try {
+    etf = findEtfByReference(ticker);
+  } catch {
+    return Response.json(
+      { error: "Holdings data is temporarily unavailable." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  if (!etf) {
+    return Response.json(
+      { error: "Unsupported ETF." },
+      { status: 404, headers: { "Cache-Control": "no-store" } },
+    );
   }
 
   try {
@@ -38,6 +57,9 @@ export async function GET(
         { status: 503, headers: { "Cache-Control": "no-store" } },
       );
     }
-    throw error;
+    return Response.json(
+      { error: "Holdings request failed." },
+      { status: 500, headers: { "Cache-Control": "no-store" } },
+    );
   }
 }

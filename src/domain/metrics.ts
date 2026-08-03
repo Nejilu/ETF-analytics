@@ -36,7 +36,7 @@ export interface MetricDefinitionView {
   aggregate: boolean;
   showInOverview: boolean;
   formula?: string;
-  aggregation?: "weighted_mean" | "weighted_harmonic";
+  aggregation?: "weighted_mean" | "weighted_harmonic" | "weighted_earnings_yield_growth";
   validRange?: { min: number; max: number };
 }
 
@@ -73,39 +73,43 @@ export const METRIC_DEFINITIONS: readonly MetricDefinitionView[] = [
     key: "eps_growth_estimate_forward_4q",
     name: "Expected EPS growth (next four quarters)",
     shortName: "Estimated EPS growth next 4Q",
-    description: "Sum of the next four quarterly consensus estimates versus the consensus estimates attached to the four latest reported quarters; no reported EPS is used.",
+    description: "Aggregate earnings growth reconstructed from the holding-weighted historical and forward earnings yields; components need positive historical and forward P/E.",
     category: "Earnings",
     unit: "percent",
     tradingViewColumn: null,
     decimals: 1,
     aggregate: true,
     showInOverview: true,
-    formula: "(sum(next_4q_consensus_eps) / sum(last_4q_historical_consensus_eps) - 1) * 100",
-    validRange: { min: -100, max: 300 },
+    formula: "(sum(holding_weight / pe_forward) / sum(holding_weight / pe_historical) - 1) * 100",
+    aggregation: "weighted_earnings_yield_growth",
   },
   {
     key: "price_to_book",
     name: "Price / book",
     shortName: "P/B",
-    description: "Weighted average price-to-book multiple.",
+    description: "Holding-weighted harmonic price-to-book multiple on positive book value.",
     category: "Valuation",
     unit: "multiple",
     tradingViewColumn: "price_book_fq",
     decimals: 1,
     aggregate: true,
     showInOverview: true,
+    formula: "sum(holding_weight) / sum(holding_weight / price_to_book)",
+    aggregation: "weighted_harmonic",
   },
   {
     key: "price_to_sales",
     name: "Price / sales",
     shortName: "P/S",
-    description: "Weighted average price-to-sales multiple.",
+    description: "Holding-weighted harmonic price-to-sales multiple on positive sales.",
     category: "Valuation",
     unit: "multiple",
     tradingViewColumn: "price_sales_current",
     decimals: 1,
     aggregate: true,
     showInOverview: true,
+    formula: "sum(holding_weight) / sum(holding_weight / price_to_sales)",
+    aggregation: "weighted_harmonic",
   },
   {
     key: "dividend_yield",
@@ -197,6 +201,7 @@ export interface WeightedMetric {
 }
 
 export interface ComponentValuationPoint {
+  /** Stable v1 identity fields retained for existing API consumers. */
   securityId: string;
   ticker: string;
   name: string;
@@ -207,6 +212,7 @@ export interface ComponentValuationPoint {
   peHistoricalEstimate4q: number;
   peForwardEstimate4q: number;
   epsGrowthEstimate4q: number;
+  /** Stable v1 detail fields retained for existing API consumers. */
   historicalEstimateSum: number;
   forwardEstimateSum: number;
   price: number;
@@ -216,9 +222,16 @@ export interface ComponentValuationPoint {
 
 export interface ComponentValuationView {
   points: ComponentValuationPoint[];
+  /** v1 counted complete metric points before P/E/display filtering. */
   eligibleCount: number;
+  /** Current transparent count of all positive-weight equity holdings. */
+  eligibleHoldingCount: number;
   displayedCount: number;
+  /** Stable v1 field; finite outliers are not clipped. */
   excludedOutlierCount: number;
+  missingMetricCount: number;
+  excludedNonPositivePeCount: number;
+  truncatedCount: number;
   representedWeight: number;
   axisLimits: {
     minGrowth: number;
@@ -239,10 +252,19 @@ export interface EtfMetricsOverview {
   componentValuation: ComponentValuationView;
 }
 
+export type MetricsOverviewWarning =
+  | "holdings-stale"
+  | "mapping-unresolved"
+  | "screener-partial"
+  | "screener-unavailable"
+  | "estimates-partial"
+  | "estimates-unavailable";
+
 export interface MetricsOverviewResult {
   calculatedAt: string;
   source: "TradingView Screener + Estimates";
-  sourceStatus: "live" | "cached" | "stale";
+  sourceStatus: "live" | "cached" | "partial" | "stale";
+  sourceWarnings: MetricsOverviewWarning[];
   cacheTtlHours: number;
   definitions: MetricDefinitionView[];
   etfs: EtfMetricsOverview[];

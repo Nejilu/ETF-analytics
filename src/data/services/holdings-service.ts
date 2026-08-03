@@ -32,7 +32,6 @@ import { analyzePortfolio } from "@/domain/processors/analyze-portfolio";
 import { deriveMarketValueHoldings } from "@/domain/processors/derive-market-value-holdings";
 import { normalizeHoldingWeights } from "@/domain/processors/normalize-holding-weights";
 import { valuePortfolioItems } from "./market-price-service";
-import { holdingsRefreshCacheKey } from "@/domain/holdings-cache";
 import { mapWithConcurrency } from "@/domain/async-utils";
 
 const DEFAULT_TTL_SECONDS = 60 * 60 * 24;
@@ -250,14 +249,8 @@ async function buildDerivedEtfSnapshot(
 }
 
 async function refreshHoldings(
-  ticker: string,
+  etf: NonNullable<ReturnType<typeof findEtfByReference>>,
 ): Promise<HoldingsSnapshot> {
-  ensureLocalDatabase();
-
-  const etf = findEtfByReference(ticker);
-  if (!etf) {
-    throw new Error(`Unsupported ETF: ${ticker}`);
-  }
   if (etf.fundType === "portfolio") {
     return buildPortfolioEtfSnapshot(etf);
   }
@@ -297,7 +290,7 @@ async function refreshHoldings(
   }
 
   try {
-    let fetched = await fetchIsharesHoldingsFile(
+    const fetched = await fetchIsharesHoldingsFile(
       etf,
       ttlSeconds,
       // A legacy normalization still needs to be parsed again, but it does
@@ -306,15 +299,8 @@ async function refreshHoldings(
       // request into an unconditional download attempt.
       Boolean(latest && !latestIsPlausible),
     );
-    let parsed = parseIsharesHoldingsCsv(fetched.raw);
-    try {
-      assertPlausibleIsharesHoldingsCount(etf, parsed.holdings.length);
-    } catch (error) {
-      if (latest && !latestIsPlausible) throw error;
-      fetched = await fetchIsharesHoldingsFile(etf, ttlSeconds, true);
-      parsed = parseIsharesHoldingsCsv(fetched.raw);
-      assertPlausibleIsharesHoldingsCount(etf, parsed.holdings.length);
-    }
+    const parsed = parseIsharesHoldingsCsv(fetched.raw);
+    assertPlausibleIsharesHoldingsCount(etf, parsed.holdings.length);
     const fetchedAt = new Date().toISOString();
     const stored = persistSnapshot({
       etf,
@@ -340,10 +326,12 @@ export async function getHoldingsSnapshot(
   reference: string,
 ): Promise<HoldingsSnapshot> {
   const normalizedReference = reference.trim();
-  let etf: ReturnType<typeof findEtfByReference>;
+  let etf: NonNullable<ReturnType<typeof findEtfByReference>>;
   try {
     ensureLocalDatabase();
-    etf = findEtfByReference(normalizedReference);
+    const resolved = findEtfByReference(normalizedReference);
+    if (!resolved) throw new Error(`Unsupported ETF: ${normalizedReference}`);
+    etf = resolved;
   } catch (error) {
     throw new HoldingsUnavailableError(
       normalizedReference,
@@ -351,20 +339,16 @@ export async function getHoldingsSnapshot(
       error,
     );
   }
-  const cacheKey = holdingsRefreshCacheKey(
-    databasePath(),
-    normalizedReference,
-    etf?.id,
-  );
+  const cacheKey = `${databasePath()}::${etf.id}`;
   const existing = inFlightRefreshes.get(cacheKey);
   if (existing) return existing;
 
-  const refresh = refreshHoldings(normalizedReference)
+  const refresh = refreshHoldings(etf)
     .catch((error) => {
       if (error instanceof HoldingsUnavailableError) throw error;
       throw new HoldingsUnavailableError(
-        etf?.ticker ?? normalizedReference,
-        etf?.id ?? normalizedReference,
+        etf.ticker,
+        etf.id,
         error,
       );
     })

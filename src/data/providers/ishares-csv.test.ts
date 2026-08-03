@@ -115,6 +115,18 @@ test("parses the current BlackRock product-data holdings response", () => {
                     "US30303M1027",
                   ],
                 },
+                cusip: {
+                  value: [
+                    "67066G104",
+                    "037833100",
+                    "594918104",
+                    "023135106",
+                    "30303M102",
+                  ],
+                },
+                sedol: {
+                  value: ["2379504", "2046251", "2588173", "2000019", "B7TL820"],
+                },
                 currencyCode: { value: ["USD", "USD", "USD", "USD", "USD"] },
                 exchange: { value: ["NASDAQ", "NASDAQ", "NASDAQ", "NASDAQ", "NASDAQ"] },
                 holdingPercent: { value: [7.5, 7, 5.3, 3.8, 3.2] },
@@ -132,4 +144,32 @@ test("parses the current BlackRock product-data holdings response", () => {
   assert.equal(parsed.holdings[0]?.ticker, "NVDA");
   assert.equal(parsed.holdings[0]?.exchange, "NASDAQ");
   assert.equal(parsed.holdings[0]?.marketValue, 750);
+  assert.equal(parsed.holdings[0]?.cusip, "67066G104");
+  assert.equal(parsed.holdings[0]?.sedol, "2379504");
+});
+
+test("uses SEDOL as the canonical fallback when BlackRock omits ISIN", () => {
+  const parsed = parseIsharesHoldingsCsv(JSON.stringify({
+    componentsByNameMap: {
+      holdings: {
+        containersByNameMap: {
+          all: {
+            dataPointsByNameMap: {
+              asOfDate: { value: 20260731 },
+              ticker: { value: ["ONE", "TWO", "THREE", "FOUR", "FIVE"] },
+              issueName: { value: ["One", "Two", "Three", "Four", "Five"] },
+              holdingPercent: { value: [20, 20, 20, 20, 20] },
+              isin: { value: ["", "US0000000002", "US0000000003", "US0000000004", "US0000000005"] },
+              sedol: { value: ["B012345", "B000002", "B000003", "B000004", "B000005"] },
+              cusip: { value: ["000000001", "000000002", "000000003", "000000004", "000000005"] },
+            },
+          },
+        },
+      },
+    },
+  }));
+
+  assert.equal(parsed.holdings[0]?.securityId, "SEDOL:B012345");
+  assert.equal(parsed.holdings[0]?.sedol, "B012345");
+  assert.equal(parsed.holdings[0]?.cusip, "000000001");
 });

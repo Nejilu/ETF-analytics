@@ -9,7 +9,11 @@ import type {
   HoldingsSnapshot,
 } from "@/domain/etf";
 
-import { getDb } from "../client";
+import { getDb, getSqlite } from "../client";
+import {
+  canonicalizeHoldingsWithPersistedIdentities,
+  reconcilePersistedSecurityIdentities,
+} from "../security-identity-repository";
 import {
   holdings,
   holdingSnapshots,
@@ -18,7 +22,11 @@ import {
 
 type SnapshotRecord = typeof holdingSnapshots.$inferSelect;
 
-function exchangeFromIdentifiers(value: unknown): string | undefined {
+function identifiersFromJson(value: unknown): {
+  exchange?: string;
+  cusip?: string;
+  sedol?: string;
+} {
   const candidate = typeof value === "string"
     ? (() => {
         try {
@@ -28,9 +36,26 @@ function exchangeFromIdentifiers(value: unknown): string | undefined {
         }
       })()
     : value;
-  if (!candidate || typeof candidate !== "object") return undefined;
-  const exchange = (candidate as Record<string, unknown>).exchange;
-  return typeof exchange === "string" && exchange.trim() ? exchange : undefined;
+  if (!candidate || typeof candidate !== "object") return {};
+  const record = candidate as Record<string, unknown>;
+  const text = (key: string) =>
+    typeof record[key] === "string" && record[key].trim()
+      ? record[key] as string
+      : undefined;
+  return {
+    exchange: text("exchange"),
+    cusip: text("cusip"),
+    sedol: text("sedol"),
+  };
+}
+
+function holdingIdentifiers(holding: Holding): Record<string, string> | null {
+  const entries = Object.entries({
+    exchange: holding.exchange,
+    cusip: holding.cusip,
+    sedol: holding.sedol,
+  }).filter((entry): entry is [string, string] => Boolean(entry[1]));
+  return entries.length > 0 ? Object.fromEntries(entries) : null;
 }
 
 const INSERT_BATCH_SIZE = 75;
@@ -95,19 +120,24 @@ export function loadSnapshot(
     sourceStatus,
     sourceUrl: snapshot.sourceUrl,
     cacheTtlHours,
-    holdings: rows.map((row) => ({
-      securityId: row.securityId,
-      ticker: row.ticker ?? row.primaryTicker ?? "—",
-      name: row.name,
-      sector: row.sector ?? "Unclassified",
-      assetClass: row.assetClass ?? "Unclassified",
-      country: row.country ?? "Not reported",
-      isin: row.isin ?? undefined,
-      weight: row.weight,
-      marketValue: row.marketValue ?? undefined,
-      currency: row.currency ?? row.securityCurrency ?? undefined,
-      exchange: exchangeFromIdentifiers(row.identifiersJson),
-    })).sort((left, right) => right.weight - left.weight),
+    holdings: rows.map((row) => {
+      const identifiers = identifiersFromJson(row.identifiersJson);
+      return {
+        securityId: row.securityId,
+        ticker: row.ticker ?? row.primaryTicker ?? "—",
+        name: row.name,
+        sector: row.sector ?? "Unclassified",
+        assetClass: row.assetClass ?? "Unclassified",
+        country: row.country ?? "Not reported",
+        isin: row.isin ?? undefined,
+        weight: row.weight,
+        marketValue: row.marketValue ?? undefined,
+        currency: row.currency ?? row.securityCurrency ?? undefined,
+        exchange: identifiers.exchange,
+        cusip: identifiers.cusip,
+        sedol: identifiers.sedol,
+      };
+    }).sort((left, right) => right.weight - left.weight),
   };
 }
 
@@ -180,27 +210,35 @@ export function persistSnapshot(
             sector: holding.sector,
             country: holding.country,
             currency: holding.currency,
-            identifiersJson: holding.exchange
-              ? { exchange: holding.exchange }
-              : null,
+            identifiersJson: holdingIdentifiers(holding),
           })),
         )
         .onConflictDoUpdate({
           target: securities.id,
           set: {
-            isin: sql`excluded.isin`,
+            isin: sql`COALESCE(excluded.isin, ${securities.isin})`,
             primaryTicker: sql`excluded.primary_ticker`,
             name: sql`excluded.name`,
             assetClass: sql`excluded.asset_class`,
             sector: sql`excluded.sector`,
             country: sql`excluded.country`,
             currency: sql`excluded.currency`,
-            identifiersJson: sql`COALESCE(excluded.identifiers_json, ${securities.identifiersJson})`,
+            identifiersJson: sql`CASE
+              WHEN excluded.identifiers_json IS NULL THEN ${securities.identifiersJson}
+              WHEN ${securities.identifiersJson} IS NULL THEN excluded.identifiers_json
+              ELSE json_patch(${securities.identifiersJson}, excluded.identifiers_json)
+            END`,
             updatedAt: sql`CURRENT_TIMESTAMP`,
           },
         })
         .run();
     }
+
+    reconcilePersistedSecurityIdentities(getSqlite(), false);
+    const canonicalHoldings = canonicalizeHoldingsWithPersistedIdentities(
+      input.holdings,
+      getSqlite(),
+    );
 
     const id = randomUUID();
     const record: SnapshotRecord = {
@@ -212,13 +250,13 @@ export function persistSnapshot(
       sourceHash: input.sourceHash,
       sourceStatus: "live",
       totalWeight,
-      rowCount: input.holdings.length,
+      rowCount: canonicalHoldings.length,
       rawMetadataJson: null,
     };
 
     transaction.insert(holdingSnapshots).values(record).run();
 
-    for (const batch of batches(input.holdings)) {
+    for (const batch of batches(canonicalHoldings)) {
       transaction
         .insert(holdings)
         .values(

@@ -241,11 +241,71 @@ function buildEtfSummaries(holdings, mappings) {
     .sort((left, right) => left.ticker.localeCompare(right.ticker));
 }
 
+function canonicalIdentityAudit(sqlite) {
+  const duplicateListings = sqlite.prepare(`
+    SELECT COUNT(*) AS count FROM (
+      SELECT UPPER(TRIM(primary_ticker)), UPPER(TRIM(name)),
+        UPPER(TRIM(COALESCE(country, '')))
+      FROM securities
+      WHERE primary_ticker IS NOT NULL AND TRIM(primary_ticker) <> ''
+      GROUP BY 1, 2, 3
+      HAVING COUNT(*) > 1
+    )
+  `).get().count;
+  const duplicateStrongIdentifiers = sqlite.prepare(`
+    SELECT COUNT(*) AS count FROM (
+      SELECT kind, value FROM (
+        SELECT 'SEDOL' AS kind,
+          UPPER(TRIM(json_extract(
+            CASE WHEN json_valid(identifiers_json) THEN identifiers_json ELSE '{}' END,
+            '$.sedol'
+          ))) AS value
+        FROM securities
+        UNION ALL
+        SELECT 'CUSIP' AS kind,
+          UPPER(TRIM(json_extract(
+            CASE WHEN json_valid(identifiers_json) THEN identifiers_json ELSE '{}' END,
+            '$.cusip'
+          ))) AS value
+        FROM securities
+      )
+      WHERE value IS NOT NULL AND value <> ''
+      GROUP BY kind, value
+      HAVING COUNT(*) > 1
+    )
+  `).get().count;
+  const orphanQueries = [
+    `SELECT COUNT(*) AS count FROM holdings AS item
+      LEFT JOIN securities AS security ON security.id = item.security_id
+      WHERE security.id IS NULL`,
+    `SELECT COUNT(*) AS count FROM security_provider_symbols AS item
+      LEFT JOIN securities AS security ON security.id = item.security_id
+      WHERE security.id IS NULL`,
+    `SELECT COUNT(*) AS count FROM portfolio_items AS item
+      LEFT JOIN securities AS security ON security.id = item.security_id
+      WHERE item.asset_type = 'security' AND security.id IS NULL`,
+    `SELECT COUNT(*) AS count FROM market_prices AS item
+      LEFT JOIN securities AS security ON security.id = item.asset_id
+      WHERE item.asset_type = 'security' AND security.id IS NULL`,
+    `SELECT COUNT(*) AS count FROM metric_observations AS item
+      LEFT JOIN securities AS security ON security.id = item.entity_id
+      WHERE item.entity_type = 'security' AND security.id IS NULL`,
+  ];
+  const orphanReferences = orphanQueries.reduce(
+    (total, query) => total + sqlite.prepare(query).get().count,
+    0,
+  );
+  return { duplicateListings, duplicateStrongIdentifiers, orphanReferences };
+}
+
 export function auditDatabase(sqlite, database) {
   const snapshots = currentSnapshots(sqlite);
   const holdings = loadCurrentEquityHoldings(sqlite, snapshots);
   const mappingAudit = loadMappings(sqlite);
-  const identity = countIdentityMismatches(sqlite, mappingAudit.bySecurity);
+  const identity = {
+    ...countIdentityMismatches(sqlite, mappingAudit.bySecurity),
+    ...canonicalIdentityAudit(sqlite),
+  };
   const resolved = [...mappingAudit.bySecurity.values()]
     .filter((mapping) => mapping.providerSymbol).length;
   const unresolved = [...mappingAudit.bySecurity.values()]
@@ -271,7 +331,7 @@ function printAudit(audit, json, breakdown) {
   console.log(`Database: ${audit.database}`);
   console.log(`TradingView mappings: ${audit.resolvedMappings.toLocaleString()} resolved, ${audit.unresolvedMappings.toLocaleString()} unresolved`);
   console.log(`Provenance: ${JSON.stringify(audit.provenanceCounts)}`);
-  console.log(`Identity mismatches: source=${audit.identity.sourceMismatches}, estimates=${audit.identity.estimateMismatches}`);
+  console.log(`Identity mismatches: source=${audit.identity.sourceMismatches}, estimates=${audit.identity.estimateMismatches}, duplicate listings=${audit.identity.duplicateListings}, duplicate strong identifiers=${audit.identity.duplicateStrongIdentifiers}, orphan references=${audit.identity.orphanReferences}`);
   console.log(`Metadata: malformed=${audit.malformedMetadata}, resolved without provenance=${audit.resolvedWithoutProvenance}`);
   for (const etf of audit.etfs) {
     console.log(`${etf.ticker}: ${etf.mapped}/${etf.holdings} mapped, ${etf.mappingCoverageWeight.toFixed(2)}% weight, provenance=${JSON.stringify(etf.provenance)}`);
@@ -300,7 +360,10 @@ export function main(argv = process.argv.slice(2)) {
       audit.malformedMetadata > 0 ||
       audit.resolvedWithoutProvenance > 0 ||
       audit.identity.sourceMismatches > 0 ||
-      audit.identity.estimateMismatches > 0
+      audit.identity.estimateMismatches > 0 ||
+      audit.identity.duplicateListings > 0 ||
+      audit.identity.duplicateStrongIdentifiers > 0 ||
+      audit.identity.orphanReferences > 0
     )) {
       process.exitCode = 2;
     }

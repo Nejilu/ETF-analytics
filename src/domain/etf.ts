@@ -79,6 +79,8 @@ export interface Holding {
   marketValue?: number;
   currency?: string;
   exchange?: string;
+  cusip?: string;
+  sedol?: string;
 }
 
 export interface ConstituentCoverage {

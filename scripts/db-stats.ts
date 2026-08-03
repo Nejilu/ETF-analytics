@@ -21,6 +21,7 @@ const tables = [
   "metric_definitions",
   "metric_observations",
   "security_provider_symbols",
+  "provider_negative_cache",
 ] as const;
 
 console.log(`Database: ${databasePath()}`);

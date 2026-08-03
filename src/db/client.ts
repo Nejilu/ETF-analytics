@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { basename, dirname, isAbsolute, resolve } from "node:path";
 
 import BetterSqlite3 from "better-sqlite3";
 import {
@@ -19,12 +19,20 @@ const globalDatabase = globalThis as typeof globalThis & {
   __indexLensDatabase?: DatabaseState;
 };
 
+export function applicationRoot(workingDirectory = process.cwd()): string {
+  const current = resolve(workingDirectory);
+  return basename(current).toLocaleLowerCase("en-US") === "standalone" &&
+    basename(dirname(current)).toLocaleLowerCase("en-US") === ".next"
+    ? resolve(current, "..", "..")
+    : current;
+}
+
 export function databasePath(): string {
   const configured = process.env.DATABASE_PATH?.trim();
   const value = configured || ".data/index-lens.sqlite";
   return isAbsolute(value)
     ? value
-    : resolve(/* turbopackIgnore: true */ process.cwd(), value);
+    : resolve(/* turbopackIgnore: true */ applicationRoot(), value);
 }
 
 function createDatabase(): DatabaseState {
@@ -45,6 +53,12 @@ function createDatabase(): DatabaseState {
 }
 
 export function databaseState(): DatabaseState {
+  const path = databasePath();
+  const existing = globalDatabase.__indexLensDatabase;
+  if (existing && (existing.path !== path || !existing.sqlite.open)) {
+    if (existing.sqlite.open) existing.sqlite.close();
+    delete globalDatabase.__indexLensDatabase;
+  }
   globalDatabase.__indexLensDatabase ??= createDatabase();
   return globalDatabase.__indexLensDatabase;
 }
@@ -55,6 +69,10 @@ export function getDb(): BetterSQLite3Database<typeof schema> {
 
 export function getSqlite(): BetterSqlite3.Database {
   return databaseState().sqlite;
+}
+
+export function isDatabaseOpen(): boolean {
+  return Boolean(globalDatabase.__indexLensDatabase?.sqlite.open);
 }
 
 export function closeDatabase(): void {

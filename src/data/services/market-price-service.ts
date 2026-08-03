@@ -26,10 +26,6 @@ import {
   MarketPriceUnavailableError,
 } from "@/domain/portfolio";
 import { mapWithConcurrency } from "@/domain/async-utils";
-import {
-  fxRateInFlightKey,
-  marketPriceInFlightKey,
-} from "@/domain/market-price-cache";
 import { valuePortfolioPositions } from "@/domain/processors/value-portfolio";
 import { securityQuoteAlias } from "@/domain/security-equivalence";
 
@@ -179,7 +175,7 @@ async function getFxRate(currency: string): Promise<FxRate> {
     };
   }
 
-  const key = fxRateInFlightKey(databasePath(), currency);
+  const key = `${databasePath()}::fx:${currency.toUpperCase()}`;
   const existing = inFlightFx.get(key);
   if (existing) return existing;
   const request = refreshFxRate(currency).finally(() => {
@@ -273,7 +269,7 @@ export async function getMarketPrice(
   assetKind: PortfolioAssetKind,
   assetId: string,
 ): Promise<MarketPrice> {
-  const key = marketPriceInFlightKey(databasePath(), assetKind, assetId);
+  const key = `${databasePath()}::${assetKind}:${assetId}`;
   const existing = inFlightPrices.get(key);
   if (existing) return existing;
   const request = refreshMarketPrice(assetKind, assetId)

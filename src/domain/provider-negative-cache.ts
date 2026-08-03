@@ -1,6 +1,6 @@
 export type NegativeCacheState = "absent" | "fresh" | "expired";
 
-class BoundedNegativeCache {
+export class BoundedNegativeCache {
   private readonly entries = new Map<string, number>();
 
   constructor(private readonly maxEntries: number) {}
@@ -35,49 +35,15 @@ class BoundedNegativeCache {
   }
 }
 
-const missingEstimateSeries = new BoundedNegativeCache(5_000);
-const missingSourceMetrics = new BoundedNegativeCache(10_000);
+export const estimateSeriesNegativeCache = new BoundedNegativeCache(5_000);
+export const sourceMetricNegativeCache = new BoundedNegativeCache(10_000);
 
-export function estimateSeriesCacheKey(databasePath: string, providerSymbol: string): string {
-  return `${databasePath}::${providerSymbol}`;
-}
-
-export function estimateSeriesMissingState(key: string, now = Date.now()): NegativeCacheState {
-  return missingEstimateSeries.state(key, now);
-}
-
-export function rememberMissingEstimateSeries(key: string, ttlMs: number, now = Date.now()): void {
-  missingEstimateSeries.rememberMissing(key, ttlMs, now);
-}
-
-export function rememberAvailableEstimateSeries(key: string): void {
-  missingEstimateSeries.rememberAvailable(key);
-}
-
-export function clearMissingEstimateSeriesCache(): void {
-  missingEstimateSeries.clear();
-}
-
-export function sourceMetricCacheKey(
+export function providerNegativeCacheKey(
   databasePath: string,
   providerSymbol: string,
-  metricKey: string,
+  metricKey = "",
 ): string {
-  return `${databasePath}::${providerSymbol}::${metricKey}`;
-}
-
-export function sourceMetricMissingState(key: string, now = Date.now()): NegativeCacheState {
-  return missingSourceMetrics.state(key, now);
-}
-
-export function rememberMissingSourceMetric(key: string, ttlMs: number, now = Date.now()): void {
-  missingSourceMetrics.rememberMissing(key, ttlMs, now);
-}
-
-export function rememberAvailableSourceMetric(key: string): void {
-  missingSourceMetrics.rememberAvailable(key);
-}
-
-export function clearMissingSourceMetricCache(): void {
-  missingSourceMetrics.clear();
+  return metricKey
+    ? `${databasePath}::${providerSymbol}::${metricKey}`
+    : `${databasePath}::${providerSymbol}`;
 }

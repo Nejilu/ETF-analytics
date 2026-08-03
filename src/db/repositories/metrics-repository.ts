@@ -189,12 +189,6 @@ interface EstimateSeriesObservationRow {
   capturedAt: string;
 }
 
-export interface SecurityMetricsReadProfile {
-  rowCount: number;
-  rowsReadMs: number;
-  mapsBuiltMs: number;
-}
-
 export interface EstimateSeriesInput {
   securityId: string;
   series: SecurityEstimateSeries;
@@ -466,19 +460,16 @@ function loadSecurityMetricRows(
 
 export function loadLatestSecurityMetrics(
   securityIds: string[],
-  onProfile?: (profile: SecurityMetricsReadProfile) => void,
 ): Map<string, CachedSecurityMetrics> {
   if (securityIds.length === 0) return new Map();
   const metricDefinitionIds = METRIC_DEFINITIONS.map((definition) => `security:${definition.key}:v1`);
   const metricKeyByDefinitionId = new Map(
     METRIC_DEFINITIONS.map((definition) => [`security:${definition.key}:v1`, definition.key]),
   );
-  const rowsStartedAt = onProfile ? performance.now() : 0;
   // This read is the hottest SQLite path in Metrics Overview. Keep the exact
   // filters/order of the Drizzle query, but avoid rebuilding the ORM statement
   // and mapping its result object for every security batch.
   const rows = loadSecurityMetricRows(securityIds, metricDefinitionIds);
-  const mapsStartedAt = onProfile ? performance.now() : 0;
 
   const result = new Map<string, CachedSecurityMetrics>();
   for (const row of rows) {
@@ -518,11 +509,6 @@ export function loadLatestSecurityMetrics(
     if (!existing.providerSymbol && row.providerSymbol) existing.providerSymbol = row.providerSymbol;
     result.set(row.securityId, existing);
   }
-  onProfile?.({
-    rowCount: rows.length,
-    rowsReadMs: Math.round((mapsStartedAt - rowsStartedAt) * 100) / 100,
-    mapsBuiltMs: Math.round((performance.now() - mapsStartedAt) * 100) / 100,
-  });
   return result;
 }
 

@@ -264,13 +264,8 @@ export async function savePortfolio(
 ): Promise<PortfolioRecord> {
   try {
     ensureLocalDatabase();
-  } catch (error) {
-    throw new PortfolioUnavailableError(error);
-  }
-  validateDrafts(drafts);
-  let items: PortfolioItem[];
-  try {
-    items = await resolveDrafts(drafts);
+    validateDrafts(drafts);
+    const items = await resolveDrafts(drafts);
     replaceDefaultPortfolioItems(items);
     return await recordWithAnalysis(loadDefaultPortfolio());
   } catch (error) {
@@ -290,98 +285,71 @@ export async function savePortfolioAsEtf(
 ): Promise<EtfShareClass> {
   try {
     ensureLocalDatabase();
-  } catch (error) {
-    throw new PortfolioUnavailableError(error);
-  }
-  const ticker = draft.ticker.trim().toUpperCase();
-  const name = draft.name.trim();
-  const customDescription = draft.description?.trim();
+    const ticker = draft.ticker.trim().toUpperCase();
+    const name = draft.name.trim();
+    const customDescription = draft.description?.trim();
 
-  if (!/^[A-Z][A-Z0-9.-]{1,9}$/.test(ticker)) {
-    throw new PortfolioRequestError(
-      "Use a ticker of 2 to 10 letters, numbers, dots or hyphens.",
-    );
-  }
-  if (name.length < 3 || name.length > 80) {
-    throw new PortfolioRequestError("The ETF name must contain between 3 and 80 characters.");
-  }
-  if (customDescription && customDescription.length > 240) {
-    throw new PortfolioRequestError("The description cannot exceed 240 characters.");
-  }
-  try {
+    if (!/^[A-Z][A-Z0-9.-]{1,9}$/.test(ticker)) {
+      throw new PortfolioRequestError(
+        "Use a ticker of 2 to 10 letters, numbers, dots or hyphens.",
+      );
+    }
+    if (name.length < 3 || name.length > 80) {
+      throw new PortfolioRequestError("The ETF name must contain between 3 and 80 characters.");
+    }
+    if (customDescription && customDescription.length > 240) {
+      throw new PortfolioRequestError("The description cannot exceed 240 characters.");
+    }
     if (findEtfByTicker(ticker)) {
       throw new PortfolioRequestError(`Ticker ${ticker} is already used.`);
     }
-  } catch (error) {
-    if (error instanceof PortfolioRequestError) throw error;
-    throw new PortfolioUnavailableError(error);
-  }
 
-  let stored: StoredPortfolio;
-  try {
-    stored = loadDefaultPortfolio();
-  } catch (error) {
-    throw new PortfolioUnavailableError(error);
-  }
-  let valuedPortfolio;
-  try {
-    valuedPortfolio = await valuePortfolioItems(stored.items);
-  } catch (error) {
-    throw new PortfolioUnavailableError(error);
-  }
-  const portfolio = { ...stored, ...valuedPortfolio };
-  if (stored.items.some((item) => !item.quantity)) {
-    try {
+    const stored = loadDefaultPortfolio();
+    const valuedPortfolio = await valuePortfolioItems(stored.items);
+    const portfolio = { ...stored, ...valuedPortfolio };
+    if (stored.items.some((item) => !item.quantity)) {
       anchorPortfolioQuantities(stored.id, portfolio.items);
-    } catch (error) {
-      throw new PortfolioUnavailableError(error);
     }
-  }
-  if (portfolio.items.length === 0) {
-    throw new PortfolioRequestError("Add portfolio positions before saving it as an ETF.");
-  }
+    if (portfolio.items.length === 0) {
+      throw new PortfolioRequestError("Add portfolio positions before saving it as an ETF.");
+    }
 
-  for (const item of portfolio.items) {
-    if (!item.quantity || item.quantity <= 0) {
-      throw new PortfolioRequestError(`A valid share quantity is required for ${item.ticker}.`);
+    for (const item of portfolio.items) {
+      if (!item.quantity || item.quantity <= 0) {
+        throw new PortfolioRequestError(`A valid share quantity is required for ${item.ticker}.`);
+      }
+      if (item.kind !== "etf") continue;
+      const component = findEtfById(item.referenceId);
+      if (
+        !component ||
+        component.fundType === "portfolio" ||
+        component.fundType === "custom"
+      ) {
+        throw new PortfolioRequestError(
+          "Saved portfolio ETFs cannot contain another synthetic portfolio ETF.",
+        );
+      }
     }
-    if (item.kind !== "etf") continue;
-    let component;
-    try {
-      component = findEtfById(item.referenceId);
-    } catch (error) {
-      throw new PortfolioUnavailableError(error);
-    }
-    if (
-      !component ||
-      component.fundType === "portfolio" ||
-      component.fundType === "custom"
-    ) {
-      throw new PortfolioRequestError(
-        "Saved portfolio ETFs cannot contain another synthetic portfolio ETF.",
-      );
-    }
-  }
 
-  const components = portfolio.items
-    .map(
-      (item) =>
-        `${item.quantity?.toFixed(6)} shares of ${item.ticker} ${
-          item.kind === "etf" ? "ETF sleeve" : "direct stock"
-        } (currently ${item.allocationWeight.toFixed(2)}%)`,
-    )
-    .join(", ");
-  const description = [
-    customDescription,
-    `Components: ${components}.`,
-    "Component weights are recalculated from current market prices, and security-level holdings use the latest persisted ETF compositions whenever this portfolio ETF is used.",
-  ]
-    .filter(Boolean)
-    .join(" ");
+    const components = portfolio.items
+      .map(
+        (item) =>
+          `${item.quantity?.toFixed(6)} shares of ${item.ticker} ${
+            item.kind === "etf" ? "ETF sleeve" : "direct stock"
+          } (currently ${item.allocationWeight.toFixed(2)}%)`,
+      )
+      .join(", ");
+    const description = [
+      customDescription,
+      `Components: ${components}.`,
+      "Component weights are recalculated from current market prices, and security-level holdings use the latest persisted ETF compositions whenever this portfolio ETF is used.",
+    ]
+      .filter(Boolean)
+      .join(" ");
 
-  try {
     return saveDefaultPortfolioAsEtf({ ticker, name, description });
   } catch (error) {
+    if (error instanceof PortfolioRequestError) throw error;
     throw new PortfolioUnavailableError(error);
   }
 }

@@ -12,16 +12,9 @@ export async function GET(request: Request) {
     const leftReference = url.searchParams.get("left")?.trim() ?? "";
     const rightReference = url.searchParams.get("right")?.trim() ?? "";
 
-    try {
-      ensureLocalDatabase();
-    } catch {
-      return Response.json(
-        { error: "Comparison data is temporarily unavailable." },
-        { status: 503, headers: { "Cache-Control": "no-store" } },
-      );
-    }
     let validSelection = false;
     try {
+      ensureLocalDatabase();
       validSelection = Boolean(
         findEtfByReference(leftReference) &&
         findEtfByReference(rightReference),

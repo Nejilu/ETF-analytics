@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -26,6 +26,7 @@ import type {
   ComponentValuationPoint,
   MetricDefinitionView,
   MetricsOverviewResult,
+  MetricsOverviewWarning,
   WeightedMetric,
 } from "@/domain/metrics";
 import { EtfSearch } from "./etf-search";
@@ -43,6 +44,15 @@ const VALUATION_STAGES = [
   { key: "pe_estimate_window_3", stage: "+3Q" },
   { key: "pe_estimate_window_4", stage: "Next 4Q estimates" },
 ] as const;
+
+const SOURCE_WARNING_LABELS: Record<MetricsOverviewWarning, string> = {
+  "holdings-stale": "Holdings cache stale",
+  "mapping-unresolved": "Some TradingView mappings unresolved",
+  "screener-partial": "Screener coverage partial",
+  "screener-unavailable": "Screener unavailable; cached fundamentals retained",
+  "estimates-partial": "Consensus estimates partial",
+  "estimates-unavailable": "Estimates unavailable; cached series retained",
+};
 
 function formatMetric(value: number | null, definition: MetricDefinitionView): string {
   if (value === null) return "—";
@@ -125,7 +135,6 @@ function ValuationPathChart({ result }: { result: MetricsOverviewResult }) {
                 strokeWidth={2.2}
                 dot={{ r: 4, fill: FUND_COLORS[index], strokeWidth: 2, stroke: "var(--surface)" }}
                 activeDot={{ r: 6 }}
-                connectNulls
               />
             ))}
           </LineChart>
@@ -195,10 +204,13 @@ function ComponentBubbleChart({ result }: { result: MetricsOverviewResult }) {
         </div>
       </div>
       <div className="metrics-bubble-summary">
-        <span><b>{view.displayedCount}</b> plotted companies</span>
+        <span><b>{view.displayedCount}/{view.eligibleHoldingCount}</b> companies plotted</span>
         <span><b>{view.representedWeight.toFixed(1)}%</b> ETF weight represented</span>
-        <span><b>Dynamic axes</b> no valid outlier excluded</span>
-        <span>Bubble area = holding weight</span>
+        {view.missingMetricCount > 0 ? <span><b>{view.missingMetricCount}</b> missing complete consensus/P/E</span> : null}
+        {view.excludedNonPositivePeCount > 0 ? <span><b>{view.excludedNonPositivePeCount}</b> excluded: non-positive forward P/E</span> : null}
+        {view.truncatedCount > 0 ? <span><b>{view.truncatedCount}</b> beyond top-500 by weight</span> : null}
+        <span><b>Dynamic axes</b> no outlier clipping</span>
+        <span>Bubble size scales with holding weight</span>
       </div>
       <div className="metrics-bubble-chart" aria-label={`${selected.ticker} constituent growth versus valuation bubble chart`}>
         <ResponsiveContainer width="100%" height="100%">
@@ -233,7 +245,7 @@ function ComponentBubbleChart({ result }: { result: MetricsOverviewResult }) {
           </ScatterChart>
         </ResponsiveContainer>
       </div>
-      <p className="metrics-chart-note">Visible axes: {view.axisLimits.minGrowth}% to {view.axisLimits.maxGrowth}% growth and 0× to {view.axisLimits.maxPe}× P/E. Up to 500 valid constituents are retained by descending ETF weight.</p>
+      <p className="metrics-chart-note">Visible axes: {view.axisLimits.minGrowth}% to {view.axisLimits.maxGrowth}% growth and 0× to {view.axisLimits.maxPe}× P/E. Negative or zero forward EPS has no finite P/E and is excluded; otherwise no outlier is clipped. Up to 500 valid constituents are retained by descending ETF weight.</p>
     </section>
   );
 }
@@ -269,6 +281,16 @@ export function MetricsOverview({ catalog, initialEtfIds }: MetricsOverviewProps
   const [result, setResult] = useState<MetricsOverviewResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestController = useRef<AbortController | null>(null);
+
+  useEffect(() => () => {
+    requestController.current?.abort();
+  }, []);
+
+  const invalidateRequest = () => {
+    requestController.current?.abort();
+    requestController.current = null;
+  };
 
   const updateSelection = (index: number, nextId: string) => {
     setSelectedIds((current) => {
@@ -277,29 +299,48 @@ export function MetricsOverview({ catalog, initialEtfIds }: MetricsOverviewProps
       const previousId = current[index];
       return current.map((id, position) => position === index ? nextId : position === duplicateIndex ? previousId : id);
     });
+    invalidateRequest();
+    setLoading(false);
     setResult(null);
   };
 
   const addSelection = () => {
     const next = allEtfs.find((etf) => !selectedIds.includes(etf.id))?.id ?? defaultId;
-    if (next) setSelectedIds((current) => [...current, next].slice(0, 4));
+    if (next) {
+      invalidateRequest();
+      setLoading(false);
+      setSelectedIds((current) => [...current, next].slice(0, 4));
+      setResult(null);
+    }
   };
 
   const analyze = async () => {
     const uniqueIds = [...new Set(selectedIds.filter(Boolean))];
     if (uniqueIds.length === 0) return;
+    invalidateRequest();
+    const controller = new AbortController();
+    requestController.current = controller;
     setLoading(true);
     setError(null);
     setResult(null);
     try {
-      const response = await fetch(`/api/v1/metrics/overview?etfs=${encodeURIComponent(uniqueIds.join(","))}`, { cache: "no-store" });
+      const response = await fetch(`/api/v1/metrics/overview?etfs=${encodeURIComponent(uniqueIds.join(","))}`, {
+        cache: "no-cache",
+        signal: controller.signal,
+      });
       const payload = await response.json() as { data?: MetricsOverviewResult; error?: string };
       if (!response.ok || !payload.data) throw new Error(payload.error ?? "TradingView metrics are unavailable.");
+      if (requestController.current !== controller) return;
       setResult(payload.data);
     } catch (requestError) {
+      if (requestError instanceof DOMException && requestError.name === "AbortError") return;
+      if (requestController.current !== controller) return;
       setError(requestError instanceof Error ? requestError.message : "TradingView metrics are unavailable.");
     } finally {
-      setLoading(false);
+      if (requestController.current === controller) {
+        requestController.current = null;
+        setLoading(false);
+      }
     }
   };
 
@@ -318,7 +359,7 @@ export function MetricsOverview({ catalog, initialEtfIds }: MetricsOverviewProps
           {selectedIds.map((etfId, index) => (
             <div className="metrics-selector" key={`${index}-${etfId}`}>
               <EtfSearch catalog={catalog} selectedId={etfId} label={`ETF ${index + 1}`} onSelect={(nextId) => updateSelection(index, nextId)} />
-              {selectedIds.length > 1 ? <button className="metrics-remove" type="button" aria-label={`Remove ETF ${index + 1}`} onClick={() => { setSelectedIds((current) => current.filter((_, position) => position !== index)); setResult(null); }}>×</button> : null}
+              {selectedIds.length > 1 ? <button className="metrics-remove" type="button" aria-label={`Remove ETF ${index + 1}`} onClick={() => { invalidateRequest(); setLoading(false); setSelectedIds((current) => current.filter((_, position) => position !== index)); setResult(null); }}>×</button> : null}
             </div>
           ))}
           {selectedIds.length < 4 ? <button className="metrics-add" type="button" onClick={addSelection}><b>+</b><span>Add ETF</span><small>Up to four funds</small></button> : null}
@@ -333,7 +374,15 @@ export function MetricsOverview({ catalog, initialEtfIds }: MetricsOverviewProps
           <section className="metrics-coverage-grid" aria-label="TradingView mapping coverage">
             {result.etfs.map((etf, index) => <article key={etf.etfId} style={{ borderTopColor: FUND_COLORS[index] }}><span>{etf.ticker} · symbol coverage</span><strong>{etf.mappingCoverageWeight.toFixed(1)}%</strong><small>{etf.mappedHoldings} / {etf.holdingsCount} equity holdings · {formatDate(etf.asOf)}</small></article>)}
           </section>
-          <div className="metrics-status-line"><span className={`source-status source-status--${result.sourceStatus}`}>{result.sourceStatus}</span>{result.source} · calculated {new Date(result.calculatedAt).toLocaleString("en-GB")} · {result.cacheTtlHours}h cache</div>
+          <div className="metrics-status-line">
+            <span className={`source-status source-status--${result.sourceStatus}`}>{result.sourceStatus}</span>
+            {result.source} · data updated {new Date(result.calculatedAt).toLocaleString("en-GB")} · {result.cacheTtlHours}h cache
+            {result.sourceWarnings.length > 0 ? (
+              <span className="metrics-status-warnings" title="Data quality warnings">
+                · {result.sourceWarnings.map((warning) => SOURCE_WARNING_LABELS[warning]).join(" · ")}
+              </span>
+            ) : null}
+          </div>
 
           <section className="metrics-feature-grid">
             <ValuationPathChart result={result} />
@@ -344,7 +393,7 @@ export function MetricsOverview({ catalog, initialEtfIds }: MetricsOverviewProps
           <section className="metrics-chart-grid">{secondaryDefinitions.map((definition) => <MetricMiniChart key={definition.key} definition={definition} result={result} />)}</section>
 
           <section className="metrics-table-panel panel">
-            <div className="panel-heading"><div><span className="eyebrow">Audit trail</span><h2>Metric coverage</h2></div><span className="info-chip">P/E harmonic · other metrics arithmetic</span></div>
+            <div className="panel-heading"><div><span className="eyebrow">Audit trail</span><h2>Metric coverage</h2></div><span className="info-chip">P/E · P/B · P/S harmonic</span></div>
             <div className="metrics-table-scroll"><table className="metrics-table"><thead><tr><th>Metric</th>{result.etfs.map((etf) => <th key={etf.etfId}>{etf.ticker}</th>)}</tr></thead><tbody>{result.definitions.map((definition) => <tr key={definition.key}><td><strong>{definition.name}</strong><small>{definition.category}</small></td>{result.etfs.map((etf) => { const metric = metricFor(etf.metrics, definition.key); return <td key={etf.etfId}><strong>{formatMetric(metric?.value ?? null, definition)}</strong><small>{metric?.coverageWeight.toFixed(1) ?? "0.0"}% weight · {metric?.coveredHoldings ?? 0}/{metric?.totalHoldings ?? 0}</small></td>; })}</tr>)}</tbody></table></div>
           </section>
         </>

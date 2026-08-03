@@ -2791,6 +2791,11 @@ tbody tr:hover {
   margin-right: 7px;
 }
 
+.metrics-status-warnings {
+  color: var(--muted);
+  margin-left: 5px;
+}
+
 .metrics-feature-grid {
   display: grid;
   gap: 12px;

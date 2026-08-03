@@ -1,36 +1,78 @@
 import "server-only";
 
-import { aggregateEtfMetrics } from "@/domain/processors/aggregate-etf-metrics";
 import {
   DERIVED_METRIC_KEYS,
-  METRIC_DEFINITIONS,
   OVERVIEW_METRIC_DEFINITIONS,
-  type ComponentValuationView,
   type MetricsOverviewResult,
+  type MetricsOverviewWarning,
   type SecurityMetricValues,
 } from "@/domain/metrics";
-import type { Holding } from "@/domain/etf";
 import { ensureLocalDatabase } from "@/db/bootstrap";
+import { databasePath } from "@/db/client";
 import {
   ensureMetricDefinitions,
-  loadLatestEstimateSeries,
+  loadProviderNegativeCache,
   loadLatestSecurityMetrics,
   loadProviderSymbols,
-  saveEstimateSeries,
-  saveProviderSymbol,
-  saveDerivedSecurityMetrics,
-  saveSecurityMetrics,
+  pruneExpiredProviderNegativeCache,
+  saveDerivedSecurityMetricsBatch,
+  type DerivedSecurityMetricsInput,
 } from "@/db/repositories/metrics-repository";
 import { findEtfByReference } from "@/db/repositories/catalog-repository";
-import { fetchTradingViewMetrics } from "@/data/providers/tradingview-screener";
-import { fetchTradingViewEstimateSeries } from "@/data/providers/tradingview-estimates";
-import { tradingViewSymbolCandidates } from "@/data/providers/tradingview-symbols";
-import { deriveEstimateSeriesMetrics } from "@/domain/processors/derive-estimate-metrics";
-import { getHoldingsSnapshot } from "./holdings-service";
+import {
+  prepareScreenerRefresh,
+  refreshScreenerMetrics,
+  ScreenerRefreshUnavailableError,
+  compatibleCachedSourceValues,
+} from "./metrics-overview-screener";
+import {
+  refreshEstimateSeries,
+  EstimatesRefreshUnavailableError,
+} from "./metrics-overview-estimates";
+import {
+  deriveEstimateSeriesMetrics,
+  replaceDerivedMetrics,
+} from "@/domain/processors/derive-estimate-metrics";
+import {
+  estimateSeriesCacheKey,
+  estimateSeriesMissingState,
+  rememberMissingEstimateSeries,
+  rememberMissingSourceMetric,
+  sourceMetricCacheKey,
+} from "@/domain/provider-negative-cache";
+import {
+  canonicalizeEtfReferences as canonicalizeReferences,
+  reorderEtfItems,
+} from "@/domain/metrics-overview-request";
+import {
+  isEstimateSeriesCompatible,
+  metricsSourceStatus,
+  resolvedProviderSymbol,
+} from "@/domain/metrics-cache";
+import {
+  getHoldingsSnapshot,
+  HoldingsUnavailableError,
+} from "./holdings-service";
+import { createMetricsOverviewDiagnostics, type MetricsOverviewDiagnostics } from "@/domain/metrics-overview-diagnostics";
+import {
+  buildEtfMetricsOverview,
+  latestTimestamp,
+  uniqueEquityHoldings,
+} from "./metrics-overview-model";
 
 const DEFAULT_TTL_SECONDS = 60 * 60 * 24;
-const COMPONENT_POINT_LIMIT = 500;
+const RESULT_CACHE_TTL_MS = 60_000;
+const PARTIAL_RESULT_CACHE_TTL_MS = 5 * 60_000;
+const STALE_RESULT_CACHE_TTL_MS = 60_000;
+const RESULT_CACHE_MAX_ENTRIES = 8;
+const MAX_INPUT_REFERENCES = 16;
+const INVALID_SELECTION_MESSAGE = "Select between one and four ETFs.";
 const inFlightRequests = new Map<string, Promise<MetricsOverviewResult>>();
+let hydratedNegativeCachePath: string | undefined;
+const resultCache = new Map<string, {
+  result: MetricsOverviewResult;
+  expiresAt: number;
+}>();
 
 function cacheTtlSeconds(): number {
   const configured = Number(process.env.TRADINGVIEW_METRICS_TTL_SECONDS);
@@ -39,44 +81,70 @@ function cacheTtlSeconds(): number {
     : DEFAULT_TTL_SECONDS;
 }
 
-function isFresh(capturedAt: string, ttlSeconds: number): boolean {
-  const timestamp = Date.parse(capturedAt);
-  return Number.isFinite(timestamp) && Date.now() - timestamp < ttlSeconds * 1_000;
+function missingEstimateSeriesTtlMs(): number {
+  const configured = Number(process.env.TRADINGVIEW_ESTIMATES_MISSING_TTL_SECONDS);
+  const seconds = Number.isFinite(configured) && configured >= 60 && configured <= 86_400
+    ? configured
+    : 900;
+  return seconds * 1_000;
 }
 
-function equityHoldings(holdings: Holding[]): Holding[] {
-  return holdings.filter((holding) =>
-    holding.weight > 0 && holding.assetClass.toLocaleLowerCase("en-US").includes("equity"));
+function missingSourceMetricTtlMs(): number {
+  const configured = Number(process.env.TRADINGVIEW_METRICS_MISSING_TTL_SECONDS);
+  const seconds = Number.isFinite(configured) && configured >= 60 && configured <= 86_400
+    ? configured
+    : 900;
+  return seconds * 1_000;
 }
 
-function uniqueHoldings(snapshots: Awaited<ReturnType<typeof getHoldingsSnapshot>>[]): Holding[] {
-  const result = new Map<string, Holding>();
-  for (const snapshot of snapshots) {
-    for (const holding of equityHoldings(snapshot.holdings)) {
-      const current = result.get(holding.securityId);
-      if (!current || (!current.exchange && holding.exchange)) {
-        result.set(holding.securityId, holding);
-      }
+function hydratePersistedNegativeCache(): void {
+  const path = databasePath();
+  if (hydratedNegativeCachePath === path) return;
+  pruneExpiredProviderNegativeCache();
+  const now = Date.now();
+  for (const entry of loadProviderNegativeCache(now)) {
+    const ttlMs = entry.expiresAt - now;
+    if (entry.cacheKind === "estimate_series") {
+      rememberMissingEstimateSeries(
+        estimateSeriesCacheKey(path, entry.providerSymbol),
+        ttlMs,
+        now,
+      );
+    } else {
+      rememberMissingSourceMetric(
+        sourceMetricCacheKey(path, entry.providerSymbol, entry.metricKey),
+        ttlMs,
+        now,
+      );
     }
   }
-  return [...result.values()];
+  hydratedNegativeCachePath = path;
 }
 
-function normalizedWords(value: string): Set<string> {
-  return new Set(value.toLocaleLowerCase("en-US")
-    .replace(/[^a-z0-9]+/g, " ")
-    .split(" ")
-    .filter((word) => word.length > 2 && !["inc", "ltd", "plc", "corp", "sa", "nv"].includes(word)));
+function cacheResult(key: string, result: MetricsOverviewResult): void {
+  resultCache.set(key, {
+    result,
+    expiresAt: Date.now() + (
+      result.sourceStatus === "stale"
+        ? STALE_RESULT_CACHE_TTL_MS
+        : result.sourceStatus === "partial"
+          ? PARTIAL_RESULT_CACHE_TTL_MS
+          : RESULT_CACHE_TTL_MS
+    ),
+  });
+  while (resultCache.size > RESULT_CACHE_MAX_ENTRIES) {
+    const oldest = resultCache.keys().next().value;
+    if (oldest === undefined) break;
+    resultCache.delete(oldest);
+  }
 }
 
-function nameScore(expected: string, actual: string | null): number {
-  if (!actual) return 0;
-  const expectedWords = normalizedWords(expected);
-  const actualWords = normalizedWords(actual);
-  if (expectedWords.size === 0) return 0;
-  let common = 0;
-  for (const word of expectedWords) if (actualWords.has(word)) common += 1;
-  return common / expectedWords.size;
+function resultForOrder(
+  result: MetricsOverviewResult,
+  orderedEtfIds: readonly string[],
+): MetricsOverviewResult {
+  const etfs = reorderEtfItems(result.etfs, orderedEtfIds);
+  return etfs.length === result.etfs.length ? { ...result, etfs } : result;
 }
 
 function materiallyDifferent(left: number | undefined, right: number | undefined): boolean {
@@ -84,246 +152,175 @@ function materiallyDifferent(left: number | undefined, right: number | undefined
   return Math.abs(left - right) > Math.max(1e-9, Math.abs(right) * 1e-9);
 }
 
-function buildComponentValuation(
-  holdings: Holding[],
-  metricsBySecurity: ReadonlyMap<string, SecurityMetricValues>,
-): ComponentValuationView {
-  const eligibleHoldings = equityHoldings(holdings);
-  const totalWeight = eligibleHoldings.reduce((sum, holding) => sum + holding.weight, 0);
-  const eligiblePoints = eligibleHoldings.flatMap((holding) => {
-    const securityMetrics = metricsBySecurity.get(holding.securityId);
-    const peHistoricalEstimate4q = securityMetrics?.values.pe_estimate_window_0;
-    const peForwardEstimate4q = securityMetrics?.values.pe_estimate_window_4;
-    const epsGrowthEstimate4q = securityMetrics?.values.eps_growth_estimate_forward_4q;
-    const series = securityMetrics?.estimateSeries;
-    if (
-      !securityMetrics || !series ||
-      !Number.isFinite(peHistoricalEstimate4q) ||
-      !Number.isFinite(peForwardEstimate4q) ||
-      !Number.isFinite(epsGrowthEstimate4q)
-    ) {
-      return [];
-    }
-    const historicalEstimateSum = series.points.slice(0, 4)
-      .reduce((sum, point) => sum + point.estimate, 0);
-    const forwardEstimateSum = series.points.slice(4, 8)
-      .reduce((sum, point) => sum + point.estimate, 0);
-    return [{
-      securityId: holding.securityId,
-      ticker: holding.ticker,
-      name: holding.name,
-      sector: holding.sector,
-      country: holding.country,
-      providerSymbol: securityMetrics.providerSymbol,
-      weight: holding.weight,
-      peHistoricalEstimate4q: peHistoricalEstimate4q as number,
-      peForwardEstimate4q: peForwardEstimate4q as number,
-      epsGrowthEstimate4q: epsGrowthEstimate4q as number,
-      historicalEstimateSum,
-      forwardEstimateSum,
-      price: series.price,
-      currency: series.currency,
-      estimatePoints: series.points,
-    }];
-  });
-  const validPoints = eligiblePoints.filter((point) => point.peForwardEstimate4q > 0);
-  const points = validPoints
-    .sort((left, right) => right.weight - left.weight)
-    .slice(0, COMPONENT_POINT_LIMIT);
-  const representedWeight = points.reduce((sum, point) => sum + point.weight, 0);
-  const minGrowth = points.length
-    ? Math.min(-10, Math.floor(Math.min(...points.map((point) => point.epsGrowthEstimate4q)) / 10) * 10)
-    : -10;
-  const maxGrowth = points.length
-    ? Math.max(30, Math.ceil(Math.max(...points.map((point) => point.epsGrowthEstimate4q)) / 10) * 10)
-    : 30;
-  const maxPe = points.length
-    ? Math.max(30, Math.ceil(Math.max(...points.map((point) => point.peForwardEstimate4q)) / 10) * 10)
-    : 30;
-  return {
-    points,
-    eligibleCount: eligiblePoints.length,
-    displayedCount: points.length,
-    excludedOutlierCount: 0,
-    representedWeight: totalWeight > 0 ? (representedWeight / totalWeight) * 100 : 0,
-    axisLimits: { minGrowth, maxGrowth, maxPe },
-  };
+async function providerOrUnavailable<T>(
+  operation: () => Promise<T>,
+  isUnavailable: (error: unknown) => boolean,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (isUnavailable(error)) throw new MetricsOverviewUnavailableError(error);
+    throw error;
+  }
 }
 
 async function buildOverview(references: string[]): Promise<MetricsOverviewResult> {
-  ensureLocalDatabase();
-  ensureMetricDefinitions();
-  const etfs = references.map((reference) => findEtfByReference(reference));
+  const diagnostics = createMetricsOverviewDiagnostics();
+  try {
+    return await buildOverviewInternal(references, diagnostics);
+  } finally {
+    diagnostics.emit({ references });
+  }
+}
+
+async function buildOverviewInternal(
+  references: string[],
+  diagnostics: MetricsOverviewDiagnostics,
+): Promise<MetricsOverviewResult> {
+  try {
+    ensureLocalDatabase();
+    ensureMetricDefinitions();
+  } catch (error) {
+    throw new MetricsOverviewUnavailableError(error);
+  }
+  hydratePersistedNegativeCache();
+  diagnostics.mark("bootstrap");
+  let etfs: ReturnType<typeof findEtfByReference>[];
+  try {
+    etfs = references.map((reference) => findEtfByReference(reference));
+  } catch (error) {
+    throw new MetricsOverviewUnavailableError(error);
+  }
   if (etfs.some((etf) => !etf)) {
-    throw new Error("Invalid ETF selection. Use funds available in the catalog.");
-  }
-  const snapshots = await Promise.all(references.map(getHoldingsSnapshot));
-  const holdings = uniqueHoldings(snapshots);
-  const securityIds = holdings.map((holding) => holding.securityId);
-  const ttlSeconds = cacheTtlSeconds();
-  const providerSymbols = loadProviderSymbols(securityIds);
-  let cachedMetrics = loadLatestSecurityMetrics(securityIds);
-  const needsRefresh = new Set(holdings.flatMap((holding) => {
-    const cached = cachedMetrics.get(holding.securityId);
-    return !cached ||
-      cached.observedKeys.size < METRIC_DEFINITIONS.length ||
-      !isFresh(cached.capturedAt, ttlSeconds)
-      ? [holding.securityId]
-      : [];
-  }));
-  for (const holding of holdings) {
-    const persisted = providerSymbols.get(holding.securityId)?.providerSymbol;
-    if (
-      persisted &&
-      /\badr\b|depositary/i.test(holding.name) &&
-      !tradingViewSymbolCandidates(holding).includes(persisted)
-    ) {
-      needsRefresh.add(holding.securityId);
-    }
-  }
-
-  const candidatesBySecurity = new Map<string, string[]>();
-  for (const holding of holdings) {
-    if (!needsRefresh.has(holding.securityId)) continue;
-    const providerRecord = providerSymbols.get(holding.securityId);
-    const persisted = providerRecord?.providerSymbol;
-    const generatedCandidates = tradingViewSymbolCandidates(holding);
-    const depositaryListingConflict = Boolean(
-      persisted &&
-      !generatedCandidates.includes(persisted) &&
-      /\badr\b|depositary/i.test(holding.name),
+    throw new MetricsOverviewRequestError(
+      "Invalid ETF selection. Use funds available in the catalog.",
     );
-    const recentlyUnresolved = providerRecord?.status === "unresolved" &&
-      isFresh(providerRecord.lastVerifiedAt, ttlSeconds);
-    const candidates = persisted && !depositaryListingConflict
-      ? [persisted]
-      : recentlyUnresolved
-        ? []
-        : generatedCandidates;
-    candidatesBySecurity.set(holding.securityId, candidates);
   }
+  diagnostics.mark("catalog");
+  const snapshots = await providerOrUnavailable(
+    () => Promise.all(references.map(getHoldingsSnapshot)),
+    (error) => error instanceof HoldingsUnavailableError,
+  );
+  const holdingsAreStale = snapshots.some((snapshot) => snapshot.sourceStatus === "stale");
+  const sourceWarnings = new Set<MetricsOverviewWarning>();
+  if (holdingsAreStale) sourceWarnings.add("holdings-stale");
+  const holdings = uniqueEquityHoldings(snapshots);
+  const securityIds = holdings.map((holding) => holding.securityId);
+  diagnostics.addContext({
+    etfCount: snapshots.length,
+    holdingCount: holdings.length,
+    securityCount: securityIds.length,
+  });
+  diagnostics.mark("holdings");
+  const ttlSeconds = cacheTtlSeconds();
+  const missingEstimateTtlMs = missingEstimateSeriesTtlMs();
+  const missingSourceMetricTtl = missingSourceMetricTtlMs();
+  let providerSymbols = loadProviderSymbols(securityIds);
+  diagnostics.mark("provider-symbols-read");
+  let cachedMetrics = loadLatestSecurityMetrics(
+    securityIds,
+    diagnostics.enabled
+      ? (profile) => diagnostics.addContext({
+        sourceMetricsRowCount: profile.rowCount,
+        sourceMetricsRowsReadMs: profile.rowsReadMs,
+        sourceMetricsMapsBuiltMs: profile.mapsBuiltMs,
+      })
+      : undefined,
+  );
+  diagnostics.mark("source-metrics-read");
+  const screenerPlan = prepareScreenerRefresh({
+    holdings,
+    providerSymbols,
+    cachedMetrics,
+    ttlSeconds,
+  });
+  diagnostics.addContext({ requestedSymbolCount: screenerPlan.requestedSymbols.length });
+  diagnostics.mark("mapping-plan");
+  if (screenerPlan.hasUnresolvedCandidates) sourceWarnings.add("mapping-unresolved");
+  const screenerResult = await providerOrUnavailable(
+    () => refreshScreenerMetrics({
+      holdings,
+      needsRefresh: screenerPlan.needsRefresh,
+      candidatesBySecurity: screenerPlan.candidatesBySecurity,
+      candidateDetailsBySecurity: screenerPlan.candidateDetailsBySecurity,
+      requestedSymbols: screenerPlan.requestedSymbols,
+      providerSymbols,
+      cachedMetrics,
+      securityIds,
+      missingSourceMetricTtlMs: missingSourceMetricTtl,
+      sourceMetricCoverageGaps: screenerPlan.sourceMetricCoverageGaps,
+    }),
+    (error) => error instanceof ScreenerRefreshUnavailableError,
+  );
+  providerSymbols = screenerResult.providerSymbols;
+  cachedMetrics = screenerResult.cachedMetrics;
+  diagnostics.addContext({
+    screenerObservationCount: screenerResult.observationCount,
+    screenerFailedSymbolCount: screenerResult.failedSymbolCount,
+    screenerMissingSymbolCount: screenerResult.missingSymbolCount,
+  });
+  diagnostics.mark("screener");
 
-  const requestedSymbols = [...new Set([...candidatesBySecurity.values()].flat())];
-  let sourceStatus: MetricsOverviewResult["sourceStatus"] = "cached";
-  if (requestedSymbols.length > 0) {
-    try {
-      const observations = await fetchTradingViewMetrics(requestedSymbols);
-      const bySymbol = new Map(observations.map((observation) => [observation.symbol, observation]));
-      const capturedAt = new Date().toISOString();
-      for (const holding of holdings) {
-        if (!needsRefresh.has(holding.securityId)) continue;
-        const candidates = candidatesBySecurity.get(holding.securityId) ?? [];
-        const matches = candidates
-          .flatMap((symbol, position) => {
-            const observation = bySymbol.get(symbol);
-            return observation
-              ? [{ observation, position, score: nameScore(holding.name, observation.description) }]
-              : [];
-          })
-          .sort((left, right) => right.score - left.score || left.position - right.position);
-        const match = matches[0];
-        if (!match) {
-          if (!providerSymbols.get(holding.securityId)?.providerSymbol) {
-            saveProviderSymbol({
-              securityId: holding.securityId,
-              providerSymbol: null,
-              status: "unresolved",
-              confidence: null,
-              metadata: { candidates, ticker: holding.ticker, exchange: holding.exchange ?? null },
-              verifiedAt: capturedAt,
-            });
-          }
-          continue;
-        }
-        const confidence = holding.exchange ? Math.max(0.9, match.score) : Math.max(0.65, match.score);
-        saveProviderSymbol({
-          securityId: holding.securityId,
-          providerSymbol: match.observation.symbol,
-          status: "resolved",
-          confidence,
-          metadata: {
-            ticker: holding.ticker,
-            exchange: holding.exchange ?? null,
-            description: match.observation.description,
-            sector: match.observation.sector,
-            alternativesTested: candidates.length,
-          },
-          verifiedAt: capturedAt,
-        });
-        saveSecurityMetrics(
-          holding.securityId,
-          match.observation.symbol,
-          match.observation.values,
-          capturedAt,
-        );
-        providerSymbols.set(holding.securityId, {
-          securityId: holding.securityId,
-          providerSymbol: match.observation.symbol,
-          status: "resolved",
-          lastVerifiedAt: capturedAt,
-        });
-      }
-      cachedMetrics = loadLatestSecurityMetrics(securityIds);
-      sourceStatus = "live";
-    } catch (error) {
-      if (cachedMetrics.size === 0) throw error;
-      sourceStatus = "stale";
-    }
+  const estimateRefreshResult = await providerOrUnavailable(
+    () => refreshEstimateSeries({
+      holdings,
+      providerSymbols,
+      securityIds,
+      ttlSeconds,
+      missingEstimateTtlMs,
+    }),
+    (error) => error instanceof EstimatesRefreshUnavailableError,
+  );
+  const cachedEstimateSeries = estimateRefreshResult.cachedEstimateSeries;
+  const providerRefreshes = [screenerResult, estimateRefreshResult];
+  for (const refresh of providerRefreshes) {
+    for (const warning of refresh.warnings) sourceWarnings.add(warning);
   }
-
-  let cachedEstimateSeries = loadLatestEstimateSeries(securityIds);
-  const estimateSecurityIds = holdings
-    .filter((holding) => {
-      const cached = cachedEstimateSeries.get(holding.securityId);
-      return Boolean(providerSymbols.get(holding.securityId)?.providerSymbol) &&
-        (!cached || !isFresh(cached.capturedAt, ttlSeconds));
-    })
-    .map((holding) => holding.securityId);
-  const estimateSymbols = [...new Set(estimateSecurityIds.flatMap((securityId) => {
-    const symbol = providerSymbols.get(securityId)?.providerSymbol;
-    return symbol ? [symbol] : [];
-  }))];
-  if (estimateSymbols.length > 0) {
-    try {
-      const seriesBySymbol = new Map(
-        (await fetchTradingViewEstimateSeries(estimateSymbols))
-          .map((series) => [series.providerSymbol, series]),
-      );
-      const capturedAt = new Date().toISOString();
-      for (const securityId of estimateSecurityIds) {
-        const symbol = providerSymbols.get(securityId)?.providerSymbol;
-        const series = symbol ? seriesBySymbol.get(symbol) : undefined;
-        if (series) saveEstimateSeries(securityId, series, capturedAt);
-      }
-      cachedEstimateSeries = loadLatestEstimateSeries(securityIds);
-      if (seriesBySymbol.size > 0) sourceStatus = "live";
-    } catch (error) {
-      if (cachedEstimateSeries.size === 0) throw error;
-      sourceStatus = "stale";
-    }
-  }
+  diagnostics.addContext({
+    estimateSeriesCount: estimateRefreshResult.seriesCount,
+    estimateFailedSymbolCount: estimateRefreshResult.failedSymbolCount,
+    estimateMissingSymbolCount: estimateRefreshResult.missingSymbolCount,
+    estimateRequestedSymbolCount: estimateRefreshResult.requestedSymbolCount,
+    estimateBatchCount: estimateRefreshResult.batchCount,
+    estimateCompletedBatchCount: estimateRefreshResult.completedBatchCount,
+    estimateNonEmptyBatchCount: estimateRefreshResult.nonEmptyBatchCount,
+    estimateFailedBatchCount: estimateRefreshResult.failedBatchCount,
+  });
+  diagnostics.mark("estimates");
 
   const metricsBySecurity = new Map<string, SecurityMetricValues>();
+  const derivedWrites: DerivedSecurityMetricsInput[] = [];
+  // The database path is constant for this request; avoid resolving it once
+  // per security and per source metric in the hot compatibility loop.
+  const metricsCachePath = databasePath();
   for (const holding of holdings) {
     const securityId = holding.securityId;
     const cached = cachedMetrics.get(securityId);
-    const estimateCache = cachedEstimateSeries.get(securityId);
-    const correctedValues = {
-      ...(cached?.values ?? {}),
-      ...(estimateCache ? deriveEstimateSeriesMetrics(estimateCache.series) : {}),
-    };
+    const currentProviderSymbol = resolvedProviderSymbol(providerSymbols.get(securityId));
+    const cachedEstimate = cachedEstimateSeries.get(securityId);
+    const missingEstimateNow = currentProviderSymbol
+      ? estimateSeriesMissingState(estimateSeriesCacheKey(metricsCachePath, currentProviderSymbol)) === "fresh"
+      : false;
+    const estimateCache = !missingEstimateNow && isEstimateSeriesCompatible(
+      cachedEstimate?.series.providerSymbol,
+      currentProviderSymbol,
+    ) ? cachedEstimate : undefined;
+    const correctedValues = replaceDerivedMetrics(
+      compatibleCachedSourceValues(cached, currentProviderSymbol, metricsCachePath),
+      estimateCache ? deriveEstimateSeriesMetrics(estimateCache.series) : {},
+    );
     const derivedChanged = DERIVED_METRIC_KEYS.some((key) =>
       materiallyDifferent(cached?.values[key], correctedValues[key]));
-    const providerSymbol = estimateCache?.series.providerSymbol ?? cached?.providerSymbol ?? "";
-    if (derivedChanged && providerSymbol) {
-      saveDerivedSecurityMetrics(
+    const providerSymbol = estimateCache?.series.providerSymbol ?? currentProviderSymbol ?? "";
+    if (derivedChanged && currentProviderSymbol && providerSymbol) {
+      derivedWrites.push({
         securityId,
         providerSymbol,
-        correctedValues,
-        estimateCache?.capturedAt ?? cached?.capturedAt ?? new Date().toISOString(),
-      );
+        values: correctedValues,
+        capturedAt: estimateCache?.capturedAt ?? cached?.capturedAt ?? new Date().toISOString(),
+      });
     }
-    if (!cached && !estimateCache) continue;
+    if (!currentProviderSymbol || (!cached && !estimateCache)) continue;
     metricsBySecurity.set(securityId, {
       securityId,
       providerSymbol,
@@ -331,32 +328,49 @@ async function buildOverview(references: string[]): Promise<MetricsOverviewResul
       estimateSeries: estimateCache?.series,
     });
   }
+  saveDerivedSecurityMetricsBatch(derivedWrites);
+  diagnostics.addContext({
+    metricSecurityCount: metricsBySecurity.size,
+    derivedWriteCount: derivedWrites.length,
+  });
+  diagnostics.mark("derive-and-write");
 
-  return {
-    calculatedAt: new Date().toISOString(),
+  const sourceStatus = metricsSourceStatus(
+    holdingsAreStale || providerRefreshes.some((refresh) => refresh.hasStaleSource),
+    screenerPlan.hasUnresolvedCandidates ||
+      providerRefreshes.some((refresh) => refresh.hasPartialCoverage),
+    providerRefreshes.some((refresh) => refresh.hasLiveSource),
+  );
+  const calculatedAt = latestTimestamp([
+    ...snapshots.map((snapshot) => snapshot.fetchedAt),
+    ...[...providerSymbols.values()].map((record) => record.lastVerifiedAt),
+    ...[...cachedMetrics.values()].map((record) => record.capturedAt),
+    ...[...cachedEstimateSeries.values()].map((record) => record.capturedAt),
+  ]);
+  const resolvedSecurityIds = new Set([...providerSymbols.entries()]
+    .filter(([, record]) => Boolean(resolvedProviderSymbol(record)))
+    .map(([securityId]) => securityId));
+
+  const result: MetricsOverviewResult = {
+    calculatedAt,
     source: "TradingView Screener + Estimates",
     sourceStatus,
+    sourceWarnings: [...sourceWarnings].sort(),
     cacheTtlHours: ttlSeconds / 3_600,
     definitions: [...OVERVIEW_METRIC_DEFINITIONS],
-    etfs: snapshots.map((snapshot) => {
-      const eligible = equityHoldings(snapshot.holdings);
-      const totalWeight = eligible.reduce((sum, holding) => sum + holding.weight, 0);
-      const mapped = eligible.filter((holding) =>
-        Boolean(providerSymbols.get(holding.securityId)?.providerSymbol));
-      const mappedWeight = mapped.reduce((sum, holding) => sum + holding.weight, 0);
-      return {
-        etfId: snapshot.etf.id,
-        ticker: snapshot.etf.ticker,
-        name: snapshot.etf.name,
-        asOf: snapshot.asOf,
-        holdingsCount: eligible.length,
-        mappedHoldings: mapped.length,
-        mappingCoverageWeight: totalWeight > 0 ? (mappedWeight / totalWeight) * 100 : 0,
-        metrics: aggregateEtfMetrics(snapshot.holdings, metricsBySecurity),
-        componentValuation: buildComponentValuation(snapshot.holdings, metricsBySecurity),
-      };
-    }),
+    etfs: snapshots.map((snapshot) => buildEtfMetricsOverview(
+      snapshot,
+      resolvedSecurityIds,
+      metricsBySecurity,
+    )),
   };
+  diagnostics.addContext({
+    sourceStatus: result.sourceStatus,
+    warningCount: result.sourceWarnings.length,
+    etfResultCount: result.etfs.length,
+  });
+  diagnostics.mark("aggregate-and-dto");
+  return result;
 }
 
 export class MetricsOverviewUnavailableError extends Error {
@@ -368,19 +382,43 @@ export class MetricsOverviewUnavailableError extends Error {
   }
 }
 
-export function getMetricsOverview(references: string[]): Promise<MetricsOverviewResult> {
-  const normalized = [...new Set(references.map((reference) => reference.trim()).filter(Boolean))];
-  if (normalized.length < 1 || normalized.length > 4) {
-    return Promise.reject(new Error("Select between one and four ETFs."));
+export class MetricsOverviewRequestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MetricsOverviewRequestError";
   }
-  const key = normalized.slice().sort().join("|");
+}
+
+export function getMetricsOverview(references: string[]): Promise<MetricsOverviewResult> {
+  if (references.length > MAX_INPUT_REFERENCES) {
+    return Promise.reject(new MetricsOverviewRequestError(INVALID_SELECTION_MESSAGE));
+  }
+  let normalized: string[];
+  try {
+    ensureLocalDatabase();
+    normalized = canonicalizeReferences(references, findEtfByReference);
+  } catch (error) {
+    return Promise.reject(new MetricsOverviewUnavailableError(error));
+  }
+  if (normalized.length < 1 || normalized.length > 4) {
+    return Promise.reject(new MetricsOverviewRequestError(INVALID_SELECTION_MESSAGE));
+  }
+  const key = `${databasePath()}::${normalized.slice().sort().join("|")}`;
+  const cached = resultCache.get(key);
+  if (cached) {
+    if (cached.expiresAt > Date.now()) {
+      resultCache.delete(key);
+      resultCache.set(key, cached);
+      return Promise.resolve(resultForOrder(cached.result, normalized));
+    }
+    resultCache.delete(key);
+  }
   const existing = inFlightRequests.get(key);
-  if (existing) return existing;
+  if (existing) return existing.then((result) => resultForOrder(result, normalized));
   const request = buildOverview(normalized)
-    .catch((error) => {
-      throw error instanceof MetricsOverviewUnavailableError
-        ? error
-        : new MetricsOverviewUnavailableError(error);
+    .then((result) => {
+      cacheResult(key, result);
+      return result;
     })
     .finally(() => inFlightRequests.delete(key));
   inFlightRequests.set(key, request);

@@ -9,6 +9,7 @@ const TRADINGVIEW_SOCKET_URL =
   "wss://data.tradingview.com/socket.io/websocket?from=symbols%2FNASDAQ-MSFT%2Fforecast-actuals-and-estimates%2F&type=chart";
 const QUOTE_FIELDS = ["eps_estimates_fq_h", "lp", "currency_code"] as const;
 const DEFAULT_BATCH_SIZE = 250;
+const DEFAULT_CONCURRENCY = 4;
 const DEFAULT_TIMEOUT_MS = 25_000;
 
 interface RawEstimate {
@@ -31,6 +32,12 @@ interface RawQuoteValues {
 
 function finiteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function isoDateFromUnixSeconds(value: number | undefined): string | null {
+  if (value === undefined) return null;
+  const date = new Date(value * 1_000);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
 }
 
 function sessionId(): string {
@@ -62,16 +69,19 @@ function parsePoint(value: unknown): EstimateSeriesPoint | null {
   if (!value || typeof value !== "object") return null;
   const point = value as RawEstimatePoint;
   const estimate = finiteNumber(point.Estimate?.average);
-  if (typeof point.FiscalPeriod !== "string" || estimate === undefined) return null;
+  if (
+    typeof point.FiscalPeriod !== "string" ||
+    point.FiscalPeriod.trim().length === 0 ||
+    typeof point.IsReported !== "boolean" ||
+    estimate === undefined
+  ) return null;
   const estimateDate = finiteNumber(point.Estimate?.date);
   const analystCount = finiteNumber(point.Estimate?.est_num);
   return {
-    fiscalPeriod: point.FiscalPeriod,
+    fiscalPeriod: point.FiscalPeriod.trim(),
     estimate,
-    isHistorical: point.IsReported === true,
-    estimateDate: estimateDate === undefined
-      ? null
-      : new Date(estimateDate * 1_000).toISOString().slice(0, 10),
+    isHistorical: point.IsReported,
+    estimateDate: isoDateFromUnixSeconds(estimateDate),
     analystCount: analystCount === undefined ? null : Math.round(analystCount),
   };
 }
@@ -87,6 +97,7 @@ export function parseTradingViewEstimateSeries(
     price === undefined ||
     price <= 0 ||
     typeof quote.currency_code !== "string" ||
+    quote.currency_code.trim().length === 0 ||
     !Array.isArray(quote.eps_estimates_fq_h)
   ) return null;
 
@@ -97,12 +108,16 @@ export function parseTradingViewEstimateSeries(
   const historical = parsed.filter((point) => point.isHistorical).slice(-4);
   const forward = parsed.filter((point) => !point.isHistorical).slice(0, 4);
   if (historical.length !== 4 || forward.length !== 4) return null;
+  const points = [...historical, ...forward];
+  if (new Set(points.map((point) => point.fiscalPeriod)).size !== points.length) {
+    return null;
+  }
 
   return {
     providerSymbol,
-    currency: quote.currency_code,
+    currency: quote.currency_code.trim(),
     price,
-    points: [...historical, ...forward],
+    points,
   };
 }
 
@@ -113,12 +128,33 @@ function configuredBatchSize(): number {
     : DEFAULT_BATCH_SIZE;
 }
 
+function configuredConcurrency(): number {
+  const configured = Number(process.env.TRADINGVIEW_ESTIMATES_CONCURRENCY);
+  return Number.isInteger(configured) && configured >= 1 && configured <= 4
+    ? configured
+    : DEFAULT_CONCURRENCY;
+}
+
 function batches<T>(items: T[], size: number): T[][] {
   const output: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
     output.push(items.slice(index, index + size));
   }
   return output;
+}
+
+type EstimateBatchFetcher = (
+  symbols: string[],
+) => Promise<SecurityEstimateSeries[]>;
+
+export interface TradingViewEstimateSeriesResult {
+  series: SecurityEstimateSeries[];
+  missingSymbols: string[];
+  failedSymbols: string[];
+  batchCount: number;
+  completedBatchCount: number;
+  nonEmptyBatchCount: number;
+  failedBatchCount: number;
 }
 
 async function fetchBatch(
@@ -153,8 +189,11 @@ async function fetchBatch(
       reject(error);
     };
     const timer = setTimeout(() => {
-      if (valuesBySymbol.size > 0) finish();
-      else fail(new Error("TradingView estimate stream timed out without data."));
+      fail(new Error(
+        valuesBySymbol.size > 0
+          ? "TradingView estimate stream timed out after partial data."
+          : "TradingView estimate stream timed out without data.",
+      ));
     }, timeoutMs);
 
     socket.on("open", () => {
@@ -189,27 +228,91 @@ async function fetchBatch(
         }
       }
     });
-    socket.on("error", (error) => fail(
-      error instanceof Error ? error : new Error("TradingView estimate stream failed."),
-    ));
+    socket.on("error", (error) => {
+      fail(error instanceof Error ? error : new Error("TradingView estimate stream failed."));
+    });
+    socket.on("close", () => {
+      fail(new Error(
+        valuesBySymbol.size > 0
+          ? "TradingView estimate stream closed after partial data."
+          : "TradingView estimate stream closed before completion.",
+      ));
+    });
   });
 }
 
-export async function fetchTradingViewEstimateSeries(
+export async function fetchTradingViewEstimateSeriesDetailed(
   symbols: string[],
-): Promise<SecurityEstimateSeries[]> {
+  batchFetcher: EstimateBatchFetcher = fetchBatch,
+): Promise<TradingViewEstimateSeriesResult> {
   const uniqueSymbols = [...new Set(symbols)].sort();
-  if (uniqueSymbols.length === 0) return [];
+  if (uniqueSymbols.length === 0) {
+    return {
+      series: [],
+      missingSymbols: [],
+      failedSymbols: [],
+      batchCount: 0,
+      completedBatchCount: 0,
+      nonEmptyBatchCount: 0,
+      failedBatchCount: 0,
+    };
+  }
   const groups = batches(uniqueSymbols, configuredBatchSize());
   const output: SecurityEstimateSeries[] = [];
-  const concurrency = Math.min(2, groups.length);
+  const errors: Error[] = [];
+  const failedGroups: string[][] = [];
+  let completedBatches = 0;
+  let nonEmptyBatches = 0;
+  const concurrency = Math.min(configuredConcurrency(), groups.length);
   let next = 0;
   await Promise.all(Array.from({ length: concurrency }, async () => {
     while (next < groups.length) {
       const index = next;
       next += 1;
-      output.push(...await fetchBatch(groups[index]));
+      try {
+        const batchOutput = await batchFetcher(groups[index]);
+        completedBatches += 1;
+        if (batchOutput.length === 0) {
+          // A valid TradingView response can contain no EPS consensus series
+          // for an exchange or security. Keep that as a coverage gap rather
+          // than treating it like a provider outage; the service can still
+          // use Screener metrics and report estimates-partial.
+          continue;
+        }
+        output.push(...batchOutput);
+        nonEmptyBatches += 1;
+      } catch (error) {
+        failedGroups.push(groups[index]);
+        errors.push(error instanceof Error ? error : new Error("TradingView estimate batch failed."));
+      }
     }
   }));
-  return output;
+  if (completedBatches === 0 && errors.length > 0) {
+    throw new Error(
+      `TradingView estimates unavailable for all batches: ${errors[0].message}`,
+    );
+  }
+  const series = output.sort((left, right) => left.providerSymbol.localeCompare(right.providerSymbol));
+  const observedSymbols = new Set(series.map((item) => item.providerSymbol));
+  const failedSymbolSet = new Set(failedGroups.flat());
+  return {
+    series,
+    missingSymbols: uniqueSymbols.filter((symbol) =>
+      !observedSymbols.has(symbol) && !failedSymbolSet.has(symbol),
+    ),
+    failedSymbols: uniqueSymbols.filter((symbol) =>
+      !observedSymbols.has(symbol) && failedSymbolSet.has(symbol),
+    ),
+    batchCount: groups.length,
+    completedBatchCount: completedBatches,
+    nonEmptyBatchCount: nonEmptyBatches,
+    failedBatchCount: failedGroups.length,
+  };
+}
+
+export async function fetchTradingViewEstimateSeries(
+  symbols: string[],
+  batchFetcher: EstimateBatchFetcher = fetchBatch,
+): Promise<SecurityEstimateSeries[]> {
+  return (await fetchTradingViewEstimateSeriesDetailed(symbols, batchFetcher)).series;
 }

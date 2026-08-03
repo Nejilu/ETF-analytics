@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { SecurityEstimateSeries } from "@/domain/metrics";
-import { deriveEstimateSeriesMetrics } from "./derive-estimate-metrics";
+import {
+  deriveEstimateSeriesMetrics,
+  replaceDerivedMetrics,
+} from "./derive-estimate-metrics";
 
 const msft: SecurityEstimateSeries = {
   providerSymbol: "NASDAQ:MSFT",
@@ -46,4 +49,18 @@ test("keeps local-currency price and EPS internally consistent", () => {
   const result = deriveEstimateSeriesMetrics(twse);
   assert.equal(result.pe_estimate_window_0, 2425 / (15 + 17 + 19 + 21));
   assert.equal(result.pe_estimate_window_4, 2425 / (23 + 25 + 27 + 29));
+});
+
+test("removes cached derived values that a fresh series no longer supports", () => {
+  const merged = replaceDerivedMetrics(
+    {
+      price_to_book: 3,
+      pe_estimate_window_0: 25,
+      pe_estimate_window_4: 20,
+    },
+    { pe_estimate_window_4: 22 },
+  );
+  assert.equal(merged.price_to_book, 3);
+  assert.equal(merged.pe_estimate_window_0, undefined);
+  assert.equal(merged.pe_estimate_window_4, 22);
 });

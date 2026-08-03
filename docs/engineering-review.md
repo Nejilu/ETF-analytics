@@ -12,9 +12,32 @@ l’[architecture Metrics Overview](metrics-overview-architecture.md).
 
 La branche est matériellement meilleure en fiabilité, couverture mondiale,
 temps de redémarrage et transparence. La livraison est structurée en lots
-logiques committés et la suite TypeScript complète passe par la commande standard.
-Le build Next production est également validé. Le contrat HTTP v1 et son ETag
-sont couverts sur la représentation sérialisée complète.
+logiques committés. La commande standard et le build Next passent dans
+l’environnement autorisant les processus enfants : 130 tests TypeScript, les
+audits annexes et la génération des 12 pages Next sont validés. Le précédent
+`spawn EPERM` était donc environnemental. Le contrat HTTP v1 et son ETag sont
+couverts sur la représentation sérialisée complète.
+
+## Réaudit de simplification
+
+Le contrôle suivant a confirmé que certaines protections avaient été découpées
+en modules trop fins. Les wrappers de clés de cache, de politique HTTP et de
+code d’erreur ont été réintégrés à leur unique consommateur. L’instrumentation
+Metrics par phases et ses compteurs internes ont été retirés après mesure.
+
+La réconciliation complète des identités n’est plus exécutée à chaque lancement
+de l’application : elle reste transactionnelle lors d’une ingestion v3, qui est
+précisément le moment où une ancienne identité peut devoir être remplacée.
+
+Un défaut fonctionnel a aussi été supprimé : un payload iShares/BlackRock trop
+court passe maintenant à la prochaine source officielle au lieu de retélécharger
+le même candidat. Compare, Portfolio, ETF Creator et Metrics ont été contrôlés
+par API et dans la webapp après ces changements.
+
+Les mécanismes conservés ont un effet mesuré ou protègent une donnée métier :
+snapshots SQLite, déduplication des appels en cours, cache de résultat Metrics,
+ETag et cache négatif. Ce dernier est désormais présenté comme une seule
+abstraction bornée avec persistance SQLite, pas comme deux caches indépendants.
 
 ## Décisions à conserver
 
@@ -39,9 +62,9 @@ sont couverts sur la représentation sérialisée complète.
   et contrôle d’émetteur.
 - Une observation Screener ou Estimates n’est utilisable que si son symbole
   correspond au mapping courant.
-- Le cache négatif en mémoire et la table `provider_negative_cache` sont
-  conservés. Leur bénéfice après redémarrage est mesuré et très supérieur à
-  leur coût conceptuel.
+- Le cache négatif borné et sa persistance `provider_negative_cache` sont
+  conservés. Leur bénéfice après redémarrage est mesuré et l’API runtime a été
+  ramenée à une abstraction unique.
 - Les entrées expirent, sont prunées au bootstrap et sont supprimées lorsqu’une
   valeur redevient disponible.
 
@@ -56,8 +79,8 @@ sont couverts sur la représentation sérialisée complète.
 - Les requêtes UI sont annulées lors d’un changement de sélection.
 - Le launcher standalone conserve les chemins SQLite/migrations et copie les
   assets statiques nécessaires.
-- Les endpoints iShares vides ou incomplets déclenchent le fallback officiel
-  BlackRock product-data sans assouplir les seuils de plausibilité.
+- Un payload iShares ou BlackRock vide ou incomplet passe à la source officielle
+  suivante sans assouplir les seuils de plausibilité propres à l’ETF.
 
 ### Persistance et performance locale
 
@@ -74,8 +97,8 @@ sont couverts sur la représentation sérialisée complète.
 
 | Sujet | Résultat observé |
 | --- | --- |
-| Audit mapping strict | 3 571 résolus, 0 unresolved, 0 mismatch, provenance complète |
-| Couverture mapping | ACWI, CHIP, IEMG, IVV et SP20 à 100 % du poids actions |
+| Audit mapping strict actuel | 3 224 résolus, 1 unresolved, 0 mismatch d’identité, provenance résolue complète |
+| Couverture mapping actuelle | ACWI, CHIP, IVV et SP20 à 100 % du poids ; IEMG à 97,37 % |
 | Cache négatif inter-processus | IEMG d’environ 5,9 s à environ 309 ms, 0 symbole redemandé |
 | Capture de `databasePath()` | `derive-and-write` environ 126,7 → 49–54 ms |
 | Mapping plan | environ 138–149 → 40–48 ms |
@@ -83,7 +106,7 @@ sont couverts sur la représentation sérialisée complète.
 | DTO compact | variante mesurée puis rejetée : elle supprimait des champs v1 |
 | Validation HTTP | réponses 200 puis 304 avec ETag stable sur les univers contrôlés |
 | Baseline séquentielle | IVV 1,1 s/654 Ko/32,3 %, ACWI 3,8 s/672 Ko/36,4 %, CHIP 35 ms/71 Ko/116,6 %, IEMG 25,6 s/673 Ko/74,4 % ; mapping 100 % |
-| Validation standard | `npm test` : 129/129 tests TS plus audits annexes ; `npm run build` : succès |
+| Validation finale | `npm test` : 130/130 tests TS et audits annexes ; `npm run build` : succès, worker TypeScript et 12 pages Next inclus |
 
 Les durées provider dépendent du réseau et de l’état des caches. Elles justifient
 les décisions prises mais ne constituent pas un SLA.
@@ -109,13 +132,12 @@ Ces pistes restent fermées sans changement mesuré de volume ou de profil.
 
 ## Écarts par rapport au plan initial
 
-### Simplification incomplète
+### Simplification ciblée
 
-Le pipeline initial comptait environ 370 lignes dans un service. L’état courant
-compte 1 437 lignes non vides dans quatre modules, dont 407 dans
-l’orchestrateur après la refactorisation finale. Les responsabilités sont plus
-nettes, mais l’objectif indicatif de 250–350 lignes pour l’orchestrateur n’est
-pas atteint.
+Le pipeline initial comptait environ 370 lignes dans un service. Après le
+réaudit, l’état courant compte 1 325 lignes non vides dans quatre modules, dont
+345 dans l’orchestrateur. L’objectif indicatif de 250–350 lignes pour
+l’orchestrateur est désormais atteint sans modifier le DTO ni les calculs.
 
 Une partie de cette hausse est justifiée par la provenance, les absences
 confirmées, la compatibilité des symboles et les transitions de statut. La
@@ -141,7 +163,7 @@ preuves, rejets et risques.
 Le worktree reste physiquement large, mais les changements sont désormais
 classés pour une livraison séparée :
 
-- **lot Metrics Overview :** contrat, agrégats, diagnostics Estimates, providers
+- **lot Metrics Overview :** contrat, agrégats, sémantique Estimates, providers
   TradingView, modèle et panel ;
 - **lot données/persistance :** iShares, holdings, repositories, schéma et
   migrations ;
@@ -188,19 +210,20 @@ node --test --experimental-test-isolation=none \
 git diff --check
 ```
 
-La suite de 129 tests TypeScript passe via `npm test`, avec l’audit mapping, le
-smoke migrations et les tests d’assets standalone enchaînés par le même script.
+Le réaudit exécute 130/130 tests TypeScript par la commande standard. Les tests
+mapping, migration et assets standalone passent dans le même enchaînement.
+`npm run build` compile l’application optimisée, termine le contrôle TypeScript
+et génère les 12 pages Next.
 
-Smoke HTTP séquentiel réussi sur IVV, ACWI, CHIP, IEMG et leur sélection
-combinée : chaque réponse initiale vaut `200`, chaque requête conditionnelle
-vaut `304`, et la couverture de mapping vaut 100 %. IEMG et la sélection
-combinée restent `stale` après échec Estimates explicite ; les autres réponses
-sont `partial` en raison d’absences confirmées.
+Le smoke HTTP couvre Catalog, Holdings, Compare, Portfolio, recherche et
+Metrics : toutes les réponses nominales valent `200`, et la requête Metrics
+conditionnelle vaut `304`. Les sélections ou payloads invalides de Compare,
+Holdings, Metrics, prix, Portfolio et ETF Creator conservent leurs contrats
+`400`/`404`.
 
-Après redémarrage du standalone, CHIP répond en 171 ms puis `304`, avec zéro
-symbole Screener et zéro série Estimates demandés. Le contrôle navigateur du
-build standalone confirme les graphes de trajectoire P/E, comparaison ETF et
-bubble chart, la bascule IVV/ACWI et l’absence d’erreur console.
+Le contrôle navigateur de la webapp confirme Compare (IVV/ACWI), ETF Creator,
+Portfolio et l’ensemble du panel Metrics, notamment les trajectoires P/E, la
+comparaison ETF et le bubble chart.
 
 Le blocage environnemental observé pendant l’audit a été levé lors de la
 validation finale :

@@ -184,6 +184,10 @@ externe.
 
 ### P2 — Corriger la sémantique des diagnostics Estimates
 
+> Phase historique terminée. Les compteurs provider ont permis la validation,
+> puis `metrics-overview-diagnostics.ts` a été retiré du runtime lors du réaudit
+> de simplification ; les statuts et warnings fonctionnels restent couverts.
+
 **Fichiers autorisés :**
 
 - `src/data/providers/tradingview-estimates.ts` et son test ;
@@ -362,13 +366,13 @@ journal détaillé.
   les cas extrêmes et quatre ETF ; orchestrateur réduit de 454 à 407 lignes.
 - **D0 — documentation :** documentation consolidée en trois fichiers
   canoniques ; ancien runbook append-only retiré ; liens README réalignés.
-- **D1 — artefacts générés :** le cache TypeScript et le bundle de validation
-  temporaire ont été retirés. `.next` est conservé comme sortie locale ignorée ;
-  `.data`, les migrations, `node_modules` et `next-env.d.ts` sont préservés.
+- **D1 — artefacts générés :** le cache TypeScript, le bundle de validation
+  temporaire et `.next` ont été retirés après le build final. La base active
+  corrigée, les migrations, `node_modules` et `next-env.d.ts` sont préservés.
 - **P5 — séparation hors périmètre :** les lots SQLite/runtime, produit
   transversal, Metrics Overview et documentation sont matérialisés en commits
   distincts et révisables.
-- **P6 — validation :** 129/129 tests TypeScript, audit mapping, migrations,
+- **P6 — validation :** 130/130 tests TypeScript, audit mapping, migrations,
   assets standalone, typecheck, lint, diff check et build Next production
   passent. Le standalone répond `200→304` pour IVV, ACWI, CHIP, IEMG et leur
   sélection combinée ; après redémarrage, CHIP ne demande aucun symbole

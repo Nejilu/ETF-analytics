@@ -107,7 +107,7 @@ le document.
 | P3 — agrégation de croissance earnings | `completed` | Codex | Formule earnings-yield, cas extrêmes/nuls et baseline IVV/ACWI/CHIP/IEMG vérifiés. |
 | P4 — réduction de complexité | `completed` | Codex | Orchestrateur 454 → 407 lignes non vides ; fusion des états provider sans nouveau module. |
 | P5 — séparation des changements hors périmètre | `completed` | Codex | Changements isolés en commits SQLite/runtime, produit, Metrics et documentation. |
-| P6 — validation finale et transmission | `completed` | Codex | `npm test`, build production, lint, typecheck, migrations, audits et diff check passent. |
+| P6 — validation finale et transmission | `completed` | Codex | Suite/build verts ; standalone 5 sélections, redémarrage sans appel provider et UI/console vérifiés. |
 
 États autorisés : `pending`, `in_progress`, `completed`, `rejected`, `blocked`.
 Il ne peut y avoir qu’une seule phase `in_progress`.
@@ -370,4 +370,6 @@ journal détaillé.
   distincts et révisables.
 - **P6 — validation :** 129/129 tests TypeScript, audit mapping, migrations,
   assets standalone, typecheck, lint, diff check et build Next production
-  passent dans l’environnement final autorisant les processus enfants.
+  passent. Le standalone répond `200→304` pour IVV, ACWI, CHIP, IEMG et leur
+  sélection combinée ; après redémarrage, CHIP ne demande aucun symbole
+  provider. Les trois graphes, la bascule IVV/ACWI et la console sont vérifiés.

@@ -197,6 +197,11 @@ vaut `304`, et la couverture de mapping vaut 100 %. IEMG et la sélection
 combinée restent `stale` après échec Estimates explicite ; les autres réponses
 sont `partial` en raison d’absences confirmées.
 
+Après redémarrage du standalone, CHIP répond en 171 ms puis `304`, avec zéro
+symbole Screener et zéro série Estimates demandés. Le contrôle navigateur du
+build standalone confirme les graphes de trajectoire P/E, comparaison ETF et
+bubble chart, la bascule IVV/ACWI et l’absence d’erreur console.
+
 Le blocage environnemental observé pendant l’audit a été levé lors de la
 validation finale :
 

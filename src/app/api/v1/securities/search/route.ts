@@ -3,7 +3,6 @@ import {
   HoldingsUnavailableError,
 } from "@/data/services/holdings-service";
 import { securityQuoteAlias } from "@/domain/security-equivalence";
-import { cacheControlForSource } from "@/domain/http-cache";
 
 const MAX_RESULTS = 12;
 
@@ -80,7 +79,9 @@ export async function GET(request: Request) {
       },
       {
         headers: {
-          "Cache-Control": cacheControlForSource(acwi.sourceStatus, "private, max-age=60"),
+          "Cache-Control": acwi.sourceStatus === "stale"
+            ? "no-store"
+            : "private, max-age=60",
         },
       },
     );

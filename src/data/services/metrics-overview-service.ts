@@ -34,11 +34,9 @@ import {
   replaceDerivedMetrics,
 } from "@/domain/processors/derive-estimate-metrics";
 import {
-  estimateSeriesCacheKey,
-  estimateSeriesMissingState,
-  rememberMissingEstimateSeries,
-  rememberMissingSourceMetric,
-  sourceMetricCacheKey,
+  estimateSeriesNegativeCache,
+  providerNegativeCacheKey,
+  sourceMetricNegativeCache,
 } from "@/domain/provider-negative-cache";
 import {
   canonicalizeEtfReferences as canonicalizeReferences,
@@ -53,7 +51,6 @@ import {
   getHoldingsSnapshot,
   HoldingsUnavailableError,
 } from "./holdings-service";
-import { createMetricsOverviewDiagnostics, type MetricsOverviewDiagnostics } from "@/domain/metrics-overview-diagnostics";
 import {
   buildEtfMetricsOverview,
   latestTimestamp,
@@ -105,14 +102,14 @@ function hydratePersistedNegativeCache(): void {
   for (const entry of loadProviderNegativeCache(now)) {
     const ttlMs = entry.expiresAt - now;
     if (entry.cacheKind === "estimate_series") {
-      rememberMissingEstimateSeries(
-        estimateSeriesCacheKey(path, entry.providerSymbol),
+      estimateSeriesNegativeCache.rememberMissing(
+        providerNegativeCacheKey(path, entry.providerSymbol),
         ttlMs,
         now,
       );
     } else {
-      rememberMissingSourceMetric(
-        sourceMetricCacheKey(path, entry.providerSymbol, entry.metricKey),
+      sourceMetricNegativeCache.rememberMissing(
+        providerNegativeCacheKey(path, entry.providerSymbol, entry.metricKey),
         ttlMs,
         now,
       );
@@ -165,18 +162,6 @@ async function providerOrUnavailable<T>(
 }
 
 async function buildOverview(references: string[]): Promise<MetricsOverviewResult> {
-  const diagnostics = createMetricsOverviewDiagnostics();
-  try {
-    return await buildOverviewInternal(references, diagnostics);
-  } finally {
-    diagnostics.emit({ references });
-  }
-}
-
-async function buildOverviewInternal(
-  references: string[],
-  diagnostics: MetricsOverviewDiagnostics,
-): Promise<MetricsOverviewResult> {
   try {
     ensureLocalDatabase();
     ensureMetricDefinitions();
@@ -184,7 +169,6 @@ async function buildOverviewInternal(
     throw new MetricsOverviewUnavailableError(error);
   }
   hydratePersistedNegativeCache();
-  diagnostics.mark("bootstrap");
   let etfs: ReturnType<typeof findEtfByReference>[];
   try {
     etfs = references.map((reference) => findEtfByReference(reference));
@@ -196,7 +180,6 @@ async function buildOverviewInternal(
       "Invalid ETF selection. Use funds available in the catalog.",
     );
   }
-  diagnostics.mark("catalog");
   const snapshots = await providerOrUnavailable(
     () => Promise.all(references.map(getHoldingsSnapshot)),
     (error) => error instanceof HoldingsUnavailableError,
@@ -206,36 +189,17 @@ async function buildOverviewInternal(
   if (holdingsAreStale) sourceWarnings.add("holdings-stale");
   const holdings = uniqueEquityHoldings(snapshots);
   const securityIds = holdings.map((holding) => holding.securityId);
-  diagnostics.addContext({
-    etfCount: snapshots.length,
-    holdingCount: holdings.length,
-    securityCount: securityIds.length,
-  });
-  diagnostics.mark("holdings");
   const ttlSeconds = cacheTtlSeconds();
   const missingEstimateTtlMs = missingEstimateSeriesTtlMs();
   const missingSourceMetricTtl = missingSourceMetricTtlMs();
   let providerSymbols = loadProviderSymbols(securityIds);
-  diagnostics.mark("provider-symbols-read");
-  let cachedMetrics = loadLatestSecurityMetrics(
-    securityIds,
-    diagnostics.enabled
-      ? (profile) => diagnostics.addContext({
-        sourceMetricsRowCount: profile.rowCount,
-        sourceMetricsRowsReadMs: profile.rowsReadMs,
-        sourceMetricsMapsBuiltMs: profile.mapsBuiltMs,
-      })
-      : undefined,
-  );
-  diagnostics.mark("source-metrics-read");
+  let cachedMetrics = loadLatestSecurityMetrics(securityIds);
   const screenerPlan = prepareScreenerRefresh({
     holdings,
     providerSymbols,
     cachedMetrics,
     ttlSeconds,
   });
-  diagnostics.addContext({ requestedSymbolCount: screenerPlan.requestedSymbols.length });
-  diagnostics.mark("mapping-plan");
   if (screenerPlan.hasUnresolvedCandidates) sourceWarnings.add("mapping-unresolved");
   const screenerResult = await providerOrUnavailable(
     () => refreshScreenerMetrics({
@@ -254,12 +218,6 @@ async function buildOverviewInternal(
   );
   providerSymbols = screenerResult.providerSymbols;
   cachedMetrics = screenerResult.cachedMetrics;
-  diagnostics.addContext({
-    screenerObservationCount: screenerResult.observationCount,
-    screenerFailedSymbolCount: screenerResult.failedSymbolCount,
-    screenerMissingSymbolCount: screenerResult.missingSymbolCount,
-  });
-  diagnostics.mark("screener");
 
   const estimateRefreshResult = await providerOrUnavailable(
     () => refreshEstimateSeries({
@@ -276,17 +234,6 @@ async function buildOverviewInternal(
   for (const refresh of providerRefreshes) {
     for (const warning of refresh.warnings) sourceWarnings.add(warning);
   }
-  diagnostics.addContext({
-    estimateSeriesCount: estimateRefreshResult.seriesCount,
-    estimateFailedSymbolCount: estimateRefreshResult.failedSymbolCount,
-    estimateMissingSymbolCount: estimateRefreshResult.missingSymbolCount,
-    estimateRequestedSymbolCount: estimateRefreshResult.requestedSymbolCount,
-    estimateBatchCount: estimateRefreshResult.batchCount,
-    estimateCompletedBatchCount: estimateRefreshResult.completedBatchCount,
-    estimateNonEmptyBatchCount: estimateRefreshResult.nonEmptyBatchCount,
-    estimateFailedBatchCount: estimateRefreshResult.failedBatchCount,
-  });
-  diagnostics.mark("estimates");
 
   const metricsBySecurity = new Map<string, SecurityMetricValues>();
   const derivedWrites: DerivedSecurityMetricsInput[] = [];
@@ -299,7 +246,9 @@ async function buildOverviewInternal(
     const currentProviderSymbol = resolvedProviderSymbol(providerSymbols.get(securityId));
     const cachedEstimate = cachedEstimateSeries.get(securityId);
     const missingEstimateNow = currentProviderSymbol
-      ? estimateSeriesMissingState(estimateSeriesCacheKey(metricsCachePath, currentProviderSymbol)) === "fresh"
+      ? estimateSeriesNegativeCache.state(
+        providerNegativeCacheKey(metricsCachePath, currentProviderSymbol),
+      ) === "fresh"
       : false;
     const estimateCache = !missingEstimateNow && isEstimateSeriesCompatible(
       cachedEstimate?.series.providerSymbol,
@@ -329,11 +278,6 @@ async function buildOverviewInternal(
     });
   }
   saveDerivedSecurityMetricsBatch(derivedWrites);
-  diagnostics.addContext({
-    metricSecurityCount: metricsBySecurity.size,
-    derivedWriteCount: derivedWrites.length,
-  });
-  diagnostics.mark("derive-and-write");
 
   const sourceStatus = metricsSourceStatus(
     holdingsAreStale || providerRefreshes.some((refresh) => refresh.hasStaleSource),
@@ -351,7 +295,7 @@ async function buildOverviewInternal(
     .filter(([, record]) => Boolean(resolvedProviderSymbol(record)))
     .map(([securityId]) => securityId));
 
-  const result: MetricsOverviewResult = {
+  return {
     calculatedAt,
     source: "TradingView Screener + Estimates",
     sourceStatus,
@@ -364,13 +308,6 @@ async function buildOverviewInternal(
       metricsBySecurity,
     )),
   };
-  diagnostics.addContext({
-    sourceStatus: result.sourceStatus,
-    warningCount: result.sourceWarnings.length,
-    etfResultCount: result.etfs.length,
-  });
-  diagnostics.mark("aggregate-and-dto");
-  return result;
 }
 
 export class MetricsOverviewUnavailableError extends Error {

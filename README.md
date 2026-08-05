@@ -51,7 +51,6 @@ TRADINGVIEW_MISSING_RETRY_LIMIT=100
 TRADINGVIEW_ESTIMATES_BATCH_SIZE=250
 TRADINGVIEW_ESTIMATES_CONCURRENCY=4
 TRADINGVIEW_ESTIMATES_MISSING_TTL_SECONDS=900
-METRICS_DIAGNOSTICS=0
 ```
 
 `MARKET_PRICE_CONCURRENCY` accepte une valeur de 1 à 8 et vaut 4 par défaut,
@@ -79,7 +78,9 @@ erreurs de lot ne sont pas mémorisées négativement afin de rester retentables
 Après une réponse confirmant l’absence, ces marqueurs sont aussi persistés
 dans `provider_negative_cache` ; ils sont réhydratés au redémarrage et
 supprimés dès que TradingView restitue le champ ou la série. Cette table ne
-contient jamais un timeout ou une erreur de transport.
+contient jamais un timeout ou une erreur de transport. Le runtime expose un
+seul cache négatif borné, avec deux instances explicites pour les séries EPS et
+les champs Screener ; la table SQLite en est uniquement la persistance.
 
 `TRADINGVIEW_BATCH_SIZE` regroupe jusqu'à 1 000 symboles par appel Screener
 (valeur par défaut), après validation entre 25 et 1 000. Un réglage plus petit
@@ -89,11 +90,6 @@ reste possible si les limites du fournisseur l'exigent.
 omis par un lot Screener qui sont rejoués dans des lots de 25. Cette seconde
 chance récupère les omissions transitoires sans multiplier les appels pour un
 univers complet ; la valeur acceptée va de 0 à 500.
-
-`METRICS_DIAGNOSTICS=1` active un journal JSON local du chemin Metrics Overview
-(phases, durées et compteurs provider) sans modifier le payload HTTP. La valeur
-`0` désactive ce coût par défaut ; cette option sert aux benchmarks standalone et
-ne doit pas être activée sur une instance publique sans collecte de logs prévue.
 
 Les libellés iShares `Nyse Euronext - Euronext Paris/Brussels/Lisbon` sont
 résolus vers `EURONEXT:` avant le fallback générique `NYSE:` afin de conserver
@@ -186,11 +182,19 @@ browser assets as well as its API routes.
 ## Current scope
 
 - Select an underlying index, then a US or UCITS ETF wrapper.
-- Ingest official iShares holdings payloads on the server, with the BlackRock
-  product-data fallback when a regional CSV endpoint returns an empty summary.
+- Ingest official iShares holdings payloads on the server, preferring BlackRock
+  product data because it exposes ISIN, SEDOL and CUSIP, with the regional CSV
+  retained as a resilient fallback.
 - Persist normalized securities and holdings snapshots in local SQLite.
-- Reuse snapshots for 24 hours and return the latest persisted snapshot as
-  stale data when iShares is temporarily unavailable.
+- Resolve every source row onto one canonical security identity. ISIN is
+  preferred, then SEDOL, CUSIP and finally a conservative name+ticker fallback.
+  Legacy `NAME:*` identities are transactionally reconciled only when one
+  unambiguous listing or strong-identifier target exists; holdings, provider
+  mappings, metrics, prices and portfolio positions are repointed together.
+- Reuse SQLite snapshots for 24 hours and return the latest persisted snapshot
+  as stale data when iShares is temporarily unavailable. SQLite is the only
+  holdings cache: after expiry, the provider request uses `no-store` so an old
+  Next.js revalidation response cannot renew a stale snapshot.
 - Use a pure, reusable processor for weighted overlap and active sleeves.
 - Rank security-level active weights independently for either ETF.
 - Build and persist a mixed ETF/direct-stock portfolio, using ACWI holdings as
@@ -198,6 +202,11 @@ browser assets as well as its API routes.
   number of shares.
 - Persist Yahoo Finance market prices and FX conversions for 24 hours, with the
   latest stored quote used as a stale fallback when a refresh fails.
+- Offer accumulating iShares share classes in Portfolio only. Each keeps its own
+  Yahoo unit-price symbol while reusing the canonical distributing ETF holdings
+  snapshot, so no duplicate iShares holdings download or snapshot is created.
+- Label iShares selector entries by underlying index, distribution policy and a
+  final parenthesized ticker, rather than by the issuer product name.
 - Expand every ETF sleeve, merge duplicate direct and indirect exposures, and
   rank the resulting synthetic portfolio at security level.
 - Save the share-based portfolio definition as a reusable local ETF. Its
@@ -265,8 +274,9 @@ drizzle/                committed SQL migrations
 
 The catalog is seeded from the versioned source manifest. Holdings are fetched
 on first access, validated, deduplicated and inserted transactionally. Later
-requests read SQLite first; iShares is contacted only after the configured TTL
-expires. If refresh fails, the latest persisted snapshot remains available.
+requests read SQLite first; iShares is contacted with a fresh `no-store`
+request only after the configured TTL expires. If refresh fails, the latest
+persisted snapshot remains available.
 HTTP 503 is returned only when no snapshot has ever been stored for the ETF.
 
 No demonstration holdings dataset is included. Each installation builds its

@@ -92,101 +92,82 @@ export async function createEtfFromSource(
 ): Promise<EtfShareClass> {
   try {
     ensureLocalDatabase();
-  } catch (error) {
-    throw new EtfCreatorUnavailableError(error);
-  }
-  if (!draft || typeof draft !== "object") {
-    throw new EtfCreatorRequestError("ETF creator data is required.");
-  }
-  if (
-    typeof draft.ticker !== "string" ||
-    typeof draft.name !== "string" ||
-    typeof draft.sourceEtfId !== "string" ||
-    (draft.description !== undefined && typeof draft.description !== "string") ||
-    !Array.isArray(draft.selectedSecurityIds) ||
-    draft.selectedSecurityIds.some((id) => typeof id !== "string")
-  ) {
-    throw new EtfCreatorRequestError("Ticker, base ETF, name and holdings must be valid.");
-  }
-  const ticker = draft.ticker.trim().toUpperCase();
-  const name = draft.name.trim();
-  const sourceEtfId = draft.sourceEtfId.trim();
-  const customDescription = draft.description?.trim();
+    if (!draft || typeof draft !== "object") {
+      throw new EtfCreatorRequestError("ETF creator data is required.");
+    }
+    if (
+      typeof draft.ticker !== "string" ||
+      typeof draft.name !== "string" ||
+      typeof draft.sourceEtfId !== "string" ||
+      (draft.description !== undefined && typeof draft.description !== "string") ||
+      !Array.isArray(draft.selectedSecurityIds) ||
+      draft.selectedSecurityIds.some((id) => typeof id !== "string")
+    ) {
+      throw new EtfCreatorRequestError("Ticker, base ETF, name and holdings must be valid.");
+    }
+    const ticker = draft.ticker.trim().toUpperCase();
+    const name = draft.name.trim();
+    const sourceEtfId = draft.sourceEtfId.trim();
+    const customDescription = draft.description?.trim();
 
-  if (!/^[A-Z][A-Z0-9.-]{1,9}$/.test(ticker)) {
-    throw new EtfCreatorRequestError("Use a ticker of 2 to 10 letters, numbers, dots or hyphens.");
-  }
-  if (name.length < 3 || name.length > 80) {
-    throw new EtfCreatorRequestError("The ETF name must contain between 3 and 80 characters.");
-  }
-  if (customDescription && customDescription.length > 240) {
-    throw new EtfCreatorRequestError("The description cannot exceed 240 characters.");
-  }
-  if (!sourceEtfId) {
-    throw new EtfCreatorRequestError("Select a base ETF before saving.");
-  }
-  try {
+    if (!/^[A-Z][A-Z0-9.-]{1,9}$/.test(ticker)) {
+      throw new EtfCreatorRequestError("Use a ticker of 2 to 10 letters, numbers, dots or hyphens.");
+    }
+    if (name.length < 3 || name.length > 80) {
+      throw new EtfCreatorRequestError("The ETF name must contain between 3 and 80 characters.");
+    }
+    if (customDescription && customDescription.length > 240) {
+      throw new EtfCreatorRequestError("The description cannot exceed 240 characters.");
+    }
+    if (!sourceEtfId) {
+      throw new EtfCreatorRequestError("Select a base ETF before saving.");
+    }
     if (findEtfByTicker(ticker)) {
       throw new EtfCreatorRequestError(`Ticker ${ticker} is already used.`);
     }
-  } catch (error) {
-    if (error instanceof EtfCreatorRequestError) throw error;
-    throw new EtfCreatorUnavailableError(error);
-  }
 
-  let sourceEtf;
-  try {
-    sourceEtf = findEtfById(sourceEtfId);
-  } catch (error) {
-    throw new EtfCreatorUnavailableError(error);
-  }
-  if (!sourceEtf) {
-    throw new EtfCreatorRequestError("The selected base ETF is no longer available.");
-  }
+    const sourceEtf = findEtfById(sourceEtfId);
+    if (!sourceEtf) {
+      throw new EtfCreatorRequestError("The selected base ETF is no longer available.");
+    }
 
-  const selectedSecurityIds = [
-    ...new Set(draft.selectedSecurityIds.map((id) => id.trim()).filter(Boolean)),
-  ];
-  if (selectedSecurityIds.length === 0) {
-    throw new EtfCreatorRequestError("Keep at least one source ETF security before saving the ETF.");
-  }
-  if (selectedSecurityIds.length > MAX_SELECTED_SECURITIES) {
-    throw new EtfCreatorRequestError(`An ETF can contain up to ${MAX_SELECTED_SECURITIES} securities.`);
-  }
+    const selectedSecurityIds = [
+      ...new Set(draft.selectedSecurityIds.map((id) => id.trim()).filter(Boolean)),
+    ];
+    if (selectedSecurityIds.length === 0) {
+      throw new EtfCreatorRequestError("Keep at least one source ETF security before saving the ETF.");
+    }
+    if (selectedSecurityIds.length > MAX_SELECTED_SECURITIES) {
+      throw new EtfCreatorRequestError(`An ETF can contain up to ${MAX_SELECTED_SECURITIES} securities.`);
+    }
 
-  const criteria = validatedCriteria(draft.criteria);
-  let source;
-  try {
-    source = await getHoldingsSnapshot(sourceEtf.id);
-  } catch (error) {
-    throw new EtfCreatorUnavailableError(error);
-  }
-  const sourceEquities = source.holdings.filter(
-    (holding) => holding.assetClass === "Equity",
-  );
-  const selectedSet = new Set(selectedSecurityIds);
-  const selected = sourceEquities.filter((holding) =>
-    selectedSet.has(holding.securityId),
-  );
-  if (selected.length !== selectedSecurityIds.length) {
-    throw new EtfCreatorRequestError(
-      "The source ETF universe changed while the selection was open. Review the selection and try again.",
+    const criteria = validatedCriteria(draft.criteria);
+    const source = await getHoldingsSnapshot(sourceEtf.id);
+    const sourceEquities = source.holdings.filter(
+      (holding) => holding.assetClass === "Equity",
     );
-  }
+    const selectedSet = new Set(selectedSecurityIds);
+    const selected = sourceEquities.filter((holding) =>
+      selectedSet.has(holding.securityId),
+    );
+    if (selected.length !== selectedSecurityIds.length) {
+      throw new EtfCreatorRequestError(
+        "The source ETF universe changed while the selection was open. Review the selection and try again.",
+      );
+    }
 
-  const normalized = normalizeCreatorHoldings(selected);
-  if (normalized.length === 0) {
-    throw new EtfCreatorRequestError("The retained source securities have no usable free-float weight.");
-  }
-  const description = [
-    customDescription,
-    `${normalized.length} ${source.etf.ticker} constituents, frozen and normalized to 100% from source free-float weights as of ${source.asOf}.`,
-    "The saved definition keeps these securities and weights unchanged.",
-  ]
-    .filter(Boolean)
-    .join(" ");
+    const normalized = normalizeCreatorHoldings(selected);
+    if (normalized.length === 0) {
+      throw new EtfCreatorRequestError("The retained source securities have no usable free-float weight.");
+    }
+    const description = [
+      customDescription,
+      `${normalized.length} ${source.etf.ticker} constituents, frozen and normalized to 100% from source free-float weights as of ${source.asOf}.`,
+      "The saved definition keeps these securities and weights unchanged.",
+    ]
+      .filter(Boolean)
+      .join(" ");
 
-  try {
     return saveCreatedEtf({
       ticker,
       name,
@@ -196,6 +177,8 @@ export async function createEtfFromSource(
       criteria,
     });
   } catch (error) {
+    if (error instanceof EtfCreatorRequestError) throw error;
+    if (error instanceof EtfCreatorUnavailableError) throw error;
     throw new EtfCreatorUnavailableError(error);
   }
 }

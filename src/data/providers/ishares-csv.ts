@@ -1,8 +1,12 @@
 import type { Holding } from "@/domain/etf";
+import {
+  fallbackSecurityId,
+  preferredSecurityId,
+} from "@/domain/security-identity";
 
 // Bump this prefix whenever the normalization changes in a way that must be
 // re-applied to snapshots already persisted from the same provider payload.
-export const ISHARES_HOLDINGS_HASH_PREFIX = "ishares-holdings-v2:";
+export const ISHARES_HOLDINGS_HASH_PREFIX = "ishares-holdings-v3:";
 
 interface ParsedHoldingsFile {
   asOf: string;
@@ -94,18 +98,6 @@ function blackrockValueAt(
     : String(value);
 }
 
-function fallbackSecurityId(name: string, ticker: string): string {
-  const normalizedName = name.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  const normalizedTicker = ticker.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-  // A name-only key can merge separate share classes when an iShares export
-  // omits ISIN (for example Lindt's LISN/LISP lines). Keep the old stable
-  // fallback for rows without a meaningful ticker, but include the ticker
-  // whenever it can disambiguate the security.
-  return normalizedTicker && normalizedTicker !== "CASH"
-    ? `NAME:${normalizedName}:${normalizedTicker}`
-    : `NAME:${normalizedName}`;
-}
-
 function parseDate(rows: string[][]): string {
   const metadata = rows.find((row) =>
     row[0]?.toLowerCase().includes("holdings as of"),
@@ -192,6 +184,8 @@ function parseBlackrockProductData(raw: string): ParsedHoldingsFile {
   const assetClasses = arrayValue("assetClass");
   const countries = arrayValue("countryOfRisk");
   const isins = arrayValue("isin");
+  const cusips = arrayValue("cusip");
+  const sedols = arrayValue("sedol");
   const currencies = arrayValue("currencyCode");
   const marketCurrencies = arrayValue("marketCurrencyCode");
   const exchanges = arrayValue("exchange");
@@ -206,10 +200,17 @@ function parseBlackrockProductData(raw: string): ParsedHoldingsFile {
       const weight = toNumber(weights[index]);
       const marketValue = toNumber(marketValues?.[index]);
       const isin = blackrockValueAt(isins, index);
+      const cusip = blackrockValueAt(cusips, index);
+      const sedol = blackrockValueAt(sedols, index);
       if (!name || (weight <= 0 && marketValue <= 0)) return null;
 
       return {
-        securityId: isin || fallbackSecurityId(name, ticker),
+        securityId: preferredSecurityId({
+          securityId: fallbackSecurityId(name, ticker),
+          isin,
+          cusip,
+          sedol,
+        }),
         ticker,
         name,
         sector: blackrockValueAt(sectors, index, "Unclassified"),
@@ -223,6 +224,8 @@ function parseBlackrockProductData(raw: string): ParsedHoldingsFile {
           blackrockValueAt(marketCurrencies, index) ||
           undefined,
         exchange: blackrockValueAt(exchanges, index) || undefined,
+        cusip: cusip || undefined,
+        sedol: sedol || undefined,
       };
     },
   ).filter((holding): holding is Holding => holding !== null);
@@ -266,6 +269,8 @@ export function parseIsharesHoldingsCsv(raw: string): ParsedHoldingsFile {
   const marketValueIndex = findColumn(headers, ["Market Value"]);
   const countryIndex = findColumn(headers, ["Location", "Country"]);
   const isinIndex = findColumn(headers, ["ISIN"]);
+  const cusipIndex = findColumn(headers, ["CUSIP"]);
+  const sedolIndex = findColumn(headers, ["SEDOL"]);
   const currencyIndex = findColumn(headers, ["Currency", "Market Currency"]);
   const exchangeIndex = findColumn(headers, ["Exchange", "Market"]);
 
@@ -277,11 +282,17 @@ export function parseIsharesHoldingsCsv(raw: string): ParsedHoldingsFile {
       const weight = toNumber(valueAt(row, weightIndex));
       const marketValue = toNumber(valueAt(row, marketValueIndex));
       const isin = valueAt(row, isinIndex);
+      const cusip = valueAt(row, cusipIndex);
+      const sedol = valueAt(row, sedolIndex);
       if (!name || (weight <= 0 && marketValue <= 0)) return null;
 
       return {
-        securityId:
-          isin || fallbackSecurityId(name, ticker),
+        securityId: preferredSecurityId({
+          securityId: fallbackSecurityId(name, ticker),
+          isin,
+          cusip,
+          sedol,
+        }),
         ticker,
         name,
         sector: valueAt(row, sectorIndex, "Unclassified"),
@@ -292,6 +303,8 @@ export function parseIsharesHoldingsCsv(raw: string): ParsedHoldingsFile {
         marketValue: marketValue || undefined,
         currency: valueAt(row, currencyIndex) || undefined,
         exchange: valueAt(row, exchangeIndex) || undefined,
+        cusip: cusip || undefined,
+        sedol: sedol || undefined,
       };
     })
     .filter((holding): holding is Holding => holding !== null);

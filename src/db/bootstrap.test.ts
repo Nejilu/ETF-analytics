@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { ensureLocalDatabase } from "./bootstrap";
 import { applicationRoot, closeDatabase, getDb } from "./client";
+import { findEtfById, findEtfByTicker } from "./repositories/catalog-repository";
 import { etfs } from "./schema";
 
 test("reinitializes migrations and catalog when DATABASE_PATH changes", () => {
@@ -16,6 +17,11 @@ test("reinitializes migrations and catalog when DATABASE_PATH changes", () => {
     process.env.DATABASE_PATH = join(firstDirectory, "first.sqlite");
     ensureLocalDatabase();
     assert.equal(getDb().select({ id: etfs.id }).from(etfs).limit(1).get()?.id, "acwi-us");
+    assert.equal(findEtfByTicker("QTOP")?.id, "qtop-us");
+    assert.equal(
+      findEtfById("qtop-ucits")?.holdingsSourceEtfId,
+      "qtop-us",
+    );
     assert.ok(existsSync(process.env.DATABASE_PATH));
 
     closeDatabase();

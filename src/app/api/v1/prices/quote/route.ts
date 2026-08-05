@@ -4,7 +4,6 @@ import {
   MarketPriceUnavailableError,
   type PortfolioAssetKind,
 } from "@/domain/portfolio";
-import { cacheControlForSource } from "@/domain/http-cache";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -27,7 +26,9 @@ export async function GET(request: Request) {
       { data: price },
       {
         headers: {
-          "Cache-Control": cacheControlForSource(price.sourceStatus, "private, max-age=60"),
+          "Cache-Control": price.sourceStatus === "stale"
+            ? "no-store"
+            : "private, max-age=60",
         },
       },
     );

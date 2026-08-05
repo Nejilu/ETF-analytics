@@ -34,11 +34,17 @@ Responsabilités :
 - Seuls les holdings actions de poids positif sont éligibles.
 - Le provider iShares rejette un HTTP 200 qui ne contient pas de lignes de
   holdings plausibles.
-- Pour les pages régionales concernées, le fallback officiel BlackRock
-  product-data récupère `dateList`, puis le composant `holdings` daté.
-- Un identifiant de secours sans ISIN inclut le ticker normalisé afin de ne pas
-  fusionner des classes partageant le même nom.
-- Le hash `ishares-holdings-v2:` force une relecture contrôlée des snapshots
+- BlackRock product-data est prioritaire lorsqu’il est disponible, car il
+  expose ISIN, SEDOL et CUSIP. Le CSV régional reste la source suivante.
+- Chaque candidat est contrôlé avec le seuil de plausibilité propre à l’ETF ;
+  un payload trop court passe réellement au candidat suivant au lieu d’être
+  retéléchargé une seconde fois.
+- Le snapshot SQLite est l’unique cache de holdings. Après expiration de son
+  TTL, BlackRock/iShares est appelé avec `no-store` afin qu’une réponse périmée
+  du cache de revalidation Next.js ne puisse pas renouveler `fetchedAt`.
+- L’identité canonique suit ISIN, SEDOL, CUSIP, puis un secours nom+ticker. Les
+  références historiques sont réconciliées transactionnellement à l’ingestion.
+- Le hash `ishares-holdings-v3:` force une relecture contrôlée des snapshots
   créés avant cette normalisation.
 
 Un mapping TradingView courant exige :
@@ -146,10 +152,10 @@ Tables principales :
 - `metric_definitions`, `metric_observations` ;
 - `provider_negative_cache`.
 
-La table de cache négatif est indexée par provider, type, symbole et métrique,
-avec une expiration epoch. Elle est prunée puis hydratée au premier bootstrap
-du chemin SQLite courant. Seules les absences confirmées y sont écrites ; une
-valeur revenue supprime sa clé.
+Le cache négatif est une seule abstraction bornée, avec deux instances : séries
+EPS et champs Screener. La table SQLite, indexée par provider, type, symbole et
+métrique, n’est que sa persistance entre redémarrages. Seules les absences
+confirmées y sont écrites ; une valeur revenue supprime sa clé.
 
 Le cache résultat Metrics Overview est borné à huit sélections. Les données
 `partial` peuvent être réutilisées brièvement car leurs absences sont déjà
@@ -177,13 +183,14 @@ dont le gain a été mesuré.
 
 ## Validation et limites
 
-Les diagnostics sont activés uniquement avec `METRICS_DIAGNOSTICS=1`. Ils
-émettent timings et compteurs dans les logs, jamais dans le DTO.
+L’instrumentation temporaire par phases a été retirée après les mesures : elle
+ajoutait une interface et des compteurs provider au chemin courant sans modifier
+le produit. Les futurs profils doivent être ponctuels et guidés par une mesure.
 
-Le dernier audit strict de la base compte 3 571 mappings résolus, aucune
-provenance manquante et aucun mismatch entre mapping, Screener et Estimates.
-Cette couverture d’identité ne signifie pas que tous les champs fondamentaux
-sont disponibles : la couverture par métrique reste affichée séparément.
+L’audit strict contrôle les mappings résolus, leur provenance, les incohérences
+entre mapping, Screener et Estimates, les doublons d’identité et les références
+orphelines. Les volumes exacts restent propres à la base auditée ; la couverture
+par métrique est affichée séparément dans le panel.
 
 La validation finale du 2026-08-03 passe avec `npm test` et `npm run build`, y
 compris les processus enfants `tsx`, le worker TypeScript et la génération des

@@ -14,9 +14,9 @@ test("adds the current Swiss CSV endpoint for legacy UK downloads", () => {
     "https://www.ishares.com/uk/individual/en/products/999999/fund/1506575576011.ajax?fileType=csv&fileName=TEST_holdings&dataType=fund";
 
   assert.deepEqual(holdingsSourceCandidates(legacyUrl), [
+    "https://www.blackrock.com/varnish-api/uk-retail01-product-data/product-data/api/v2/get-product-data?portfolioId=999999&component=holdings&appType=PRODUCT_PAGE&appSubType=ISHARES&targetSite=uk-ishares&locale=en_GB&userType=individual",
     legacyUrl,
     "https://www.ishares.com/ch/individual/en/products/999999/fund/1495092304805.ajax?fileType=csv&fileName=TEST_holdings&dataType=fund",
-    "https://www.blackrock.com/varnish-api/uk-retail01-product-data/product-data/api/v2/get-product-data?portfolioId=999999&component=holdings&appType=PRODUCT_PAGE&appSubType=ISHARES&targetSite=uk-ishares&locale=en_GB&userType=individual",
   ]);
 });
 
@@ -34,8 +34,8 @@ test("adds the BlackRock product-data fallback for a US latest-holdings URL", ()
     "https://www.ishares.com/us/products/239726/ishares-core-s-p-500-etf/latest-holdings.csv";
 
   assert.deepEqual(holdingsSourceCandidates(primaryUrl), [
-    primaryUrl,
     "https://www.blackrock.com/varnish-api/blk-one01-product-data/product-data/api/v2/get-product-data?portfolioId=239726&component=holdings&appType=PRODUCT_PAGE&appSubType=ISHARES&targetSite=us-ishares&locale=en_US&userType=individual",
+    primaryUrl,
   ]);
 });
 
@@ -46,12 +46,12 @@ test("derives the UK BlackRock fallback from the product page when the CSV is Sw
     "https://www.ishares.com/uk/individual/en/products/339541/ishares-s-p-500-top-20-ucits-etf";
 
   assert.deepEqual(holdingsSourceCandidates(swissCsvUrl, ukProductUrl), [
-    swissCsvUrl,
     "https://www.blackrock.com/varnish-api/uk-retail01-product-data/product-data/api/v2/get-product-data?portfolioId=339541&component=holdings&appType=PRODUCT_PAGE&appSubType=ISHARES&targetSite=uk-ishares&locale=en_GB&userType=individual",
+    swissCsvUrl,
   ]);
 });
 
-test("retries an empty US CSV through the dated BlackRock response", async () => {
+test("prefers the identified dated BlackRock response over the identifier-poor CSV", async () => {
   const originalFetch = globalThis.fetch;
   const calls: string[] = [];
   const primaryUrl =
@@ -66,7 +66,11 @@ test("retries an empty US CSV through the dated BlackRock response", async () =>
     componentsByNameMap: {
       holdings: {
         containersByNameMap: {
-          all: { dataPointsByNameMap: { dateList: { value: [20260731] } } },
+          all: {
+            dataPointsByNameMap: {
+              dateList: { value: [20260731, 20260804] },
+            },
+          },
         },
       },
     },
@@ -86,15 +90,11 @@ test("retries an empty US CSV through the dated BlackRock response", async () =>
     },
   });
 
-  globalThis.fetch = (async (input) => {
+  globalThis.fetch = (async (input, init) => {
     const url = String(input);
     calls.push(url);
-    if (url === primaryUrl) {
-      return new Response(
-        'Fund Holdings as of,"-"\nTicker,Name,Weight (%)\n',
-        { headers: { "content-type": "text/plain" } },
-      );
-    }
+    assert.equal(init?.cache, "no-store");
+    assert.equal("next" in (init ?? {}), false);
     if (!url.includes("asOfDate=")) {
       return new Response(metadata, {
         headers: { "content-type": "application/json" },
@@ -106,9 +106,107 @@ test("retries an empty US CSV through the dated BlackRock response", async () =>
   }) as typeof fetch;
 
   try {
-    const result = await fetchIsharesHoldingsFile(etf, 3_600, true);
-    assert.equal(result.sourceUrl.endsWith("asOfDate=20260731"), true);
-    assert.equal(calls.length, 3);
+    const result = await fetchIsharesHoldingsFile(etf);
+    assert.equal(result.sourceUrl.endsWith("asOfDate=20260804"), true);
+    assert.equal(calls.length, 2);
+    assert.equal(calls.includes(primaryUrl), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("falls back to the official CSV when BlackRock product data is unavailable", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: string[] = [];
+  const primaryUrl =
+    "https://www.ishares.com/us/products/239726/ishares-core-s-p-500-etf/latest-holdings.csv";
+  const etf = {
+    id: "ivv-us",
+    ticker: "IVV",
+    productUrl: "https://www.ishares.com/us/products/239726/IVV",
+    holdingsUrl: primaryUrl,
+  } as Parameters<typeof fetchIsharesHoldingsFile>[0];
+  const csv = [
+    'Fund Holdings as of,"Jul 31, 2026"',
+    "Ticker,Name,Weight (%)",
+    "A,Alpha,20",
+    "B,Beta,20",
+    "C,Gamma,20",
+    "D,Delta,20",
+    "E,Epsilon,20",
+  ].join("\n");
+
+  globalThis.fetch = (async (input) => {
+    const url = String(input);
+    calls.push(url);
+    return url.includes("/varnish-api/")
+      ? new Response("unavailable", { status: 503 })
+      : new Response(csv, { headers: { "content-type": "text/plain" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await fetchIsharesHoldingsFile(etf);
+    assert.equal(result.sourceUrl, primaryUrl);
+    assert.equal(calls.length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("tries the next official source when BlackRock data is implausibly short", async () => {
+  const originalFetch = globalThis.fetch;
+  const primaryUrl =
+    "https://www.ishares.com/us/products/239600/ishares-msci-acwi-etf/latest-holdings.csv";
+  const etf = {
+    id: "acwi-us",
+    ticker: "ACWI",
+    productUrl: "https://www.ishares.com/us/products/239600/ACWI",
+    holdingsUrl: primaryUrl,
+  } as Parameters<typeof fetchIsharesHoldingsFile>[0];
+  const metadata = JSON.stringify({
+    componentsByNameMap: {
+      holdings: {
+        containersByNameMap: {
+          all: { dataPointsByNameMap: { dateList: { value: [20260731] } } },
+        },
+      },
+    },
+  });
+  const truncated = JSON.stringify({
+    componentsByNameMap: {
+      holdings: {
+        containersByNameMap: {
+          all: {
+            dataPointsByNameMap: {
+              ticker: { value: Array.from({ length: 1_652 }, (_, index) => `T${index}`) },
+              holdingPercent: { value: Array.from({ length: 1_652 }, () => 0.05) },
+            },
+          },
+        },
+      },
+    },
+  });
+  const csv = [
+    'Fund Holdings as of,"Jul 31, 2026"',
+    "Ticker,Name,Weight (%)",
+    ...Array.from({ length: 2_000 }, (_, index) =>
+      `T${index},Company ${index},0.05`),
+  ].join("\n");
+
+  globalThis.fetch = (async (input) => {
+    const url = String(input);
+    if (url === primaryUrl) {
+      return new Response(csv, { headers: { "content-type": "text/plain" } });
+    }
+    if (url.includes("asOfDate=")) {
+      return new Response(truncated, { headers: { "content-type": "application/json" } });
+    }
+    return new Response(metadata, { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await fetchIsharesHoldingsFile(etf);
+    assert.equal(result.sourceUrl, primaryUrl);
   } finally {
     globalThis.fetch = originalFetch;
   }

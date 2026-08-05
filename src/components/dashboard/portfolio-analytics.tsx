@@ -173,6 +173,13 @@ export function PortfolioAnalytics({
     };
   }, [kind, query, selectedSecurity]);
 
+  const selectedEtf =
+    kind === "etf"
+      ? etfs.find((etf) => etf.id === selectedEtfId)
+      : undefined;
+  const selectedHoldingsSourceEtf = selectedEtf?.holdingsSourceEtfId
+    ? etfs.find((etf) => etf.id === selectedEtf.holdingsSourceEtfId)
+    : undefined;
   const selectedReferenceId =
     kind === "etf" ? selectedEtfId : selectedSecurity?.securityId;
 
@@ -274,10 +281,7 @@ export function PortfolioAnalytics({
       return;
     }
 
-    const etfSelection =
-      kind === "etf"
-        ? etfs.find((etf) => etf.id === selectedEtfId)
-        : undefined;
+    const etfSelection = selectedEtf;
     const securitySelection = kind === "security" ? selectedSecurity : null;
     if (!etfSelection && !securitySelection) {
       setError(
@@ -504,7 +508,7 @@ export function PortfolioAnalytics({
               }}
             >
               ETF
-              <small>Existing Active Shares catalog</small>
+              <small>Supported funds and accumulating share classes</small>
             </button>
             <button
               type="button"
@@ -525,7 +529,7 @@ export function PortfolioAnalytics({
             <EtfSearch
               catalog={sourceCatalog}
               selectedId={selectedEtfId}
-              label="Search supported ETFs"
+              label="Search ETF or accumulating share class"
               onSelect={setSelectedEtfId}
             />
           ) : (
@@ -642,7 +646,10 @@ export function PortfolioAnalytics({
                   </strong>
                 ) : null}
                 <small>
-                  {activeQuote.sourceStatus} price · cached for up to 24 hours
+                  {activeQuote.sourceStatus} price - cached for up to 24 hours
+                  {selectedHoldingsSourceEtf
+                    ? ` - ${selectedHoldingsSourceEtf.ticker} look-through holdings`
+                    : ""}
                 </small>
               </>
             ) : quoteError ? (

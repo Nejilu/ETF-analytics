@@ -1,10 +1,8 @@
 import type { Holding } from "@/domain/etf";
 import type { MetricsOverviewWarning } from "@/domain/metrics";
 import {
-  estimateSeriesCacheKey,
-  estimateSeriesMissingState,
-  rememberAvailableEstimateSeries,
-  rememberMissingEstimateSeries,
+  estimateSeriesNegativeCache,
+  providerNegativeCacheKey,
 } from "@/domain/provider-negative-cache";
 import {
   hasUnrefreshedCachedItems,
@@ -39,14 +37,6 @@ export interface RefreshEstimateSeriesResult {
   hasLiveSource: boolean;
   hasPartialCoverage: boolean;
   hasStaleSource: boolean;
-  seriesCount: number;
-  failedSymbolCount: number;
-  missingSymbolCount: number;
-  requestedSymbolCount: number;
-  batchCount: number;
-  completedBatchCount: number;
-  nonEmptyBatchCount: number;
-  failedBatchCount: number;
 }
 
 export class EstimatesRefreshUnavailableError extends Error {
@@ -87,8 +77,8 @@ export async function refreshEstimateSeries(
       const cached = cachedEstimateSeries.get(holding.securityId);
       const providerSymbol = resolvedProviderSymbol(input.providerSymbols.get(holding.securityId));
       if (!providerSymbol) return false;
-      const estimateCacheKey = estimateSeriesCacheKey(metricsCachePath, providerSymbol);
-      const missingState = estimateSeriesMissingState(estimateCacheKey);
+      const estimateCacheKey = providerNegativeCacheKey(metricsCachePath, providerSymbol);
+      const missingState = estimateSeriesNegativeCache.state(estimateCacheKey);
       if (missingState === "fresh") {
         estimateCoverageGaps.add(holding.securityId);
         return false;
@@ -110,23 +100,10 @@ export async function refreshEstimateSeries(
   let hasLiveSource = false;
   let hasPartialCoverage = false;
   let hasStaleSource = false;
-  let seriesCount = 0;
-  let failedSymbolCount = 0;
-  let missingSymbolCount = 0;
-  const requestedSymbolCount = estimateSymbols.length;
-  let batchCount = 0;
-  let completedBatchCount = 0;
-  let nonEmptyBatchCount = 0;
-  let failedBatchCount = 0;
-
   if (estimateSymbols.length > 0) {
     try {
       const cachedEstimateIdsBeforeRefresh = new Set(cachedEstimateSeries.keys());
       const estimateResult = await fetchTradingViewEstimateSeriesDetailed(estimateSymbols);
-      batchCount = estimateResult.batchCount;
-      completedBatchCount = estimateResult.completedBatchCount;
-      nonEmptyBatchCount = estimateResult.nonEmptyBatchCount;
-      failedBatchCount = estimateResult.failedBatchCount;
       const seriesBySymbol = new Map(
         estimateResult.series.map((series) => [series.providerSymbol, series]),
       );
@@ -136,15 +113,12 @@ export async function refreshEstimateSeries(
         const symbol = resolvedProviderSymbol(input.providerSymbols.get(securityId));
         return Boolean(symbol && missingSymbols.has(symbol));
       });
-      seriesCount = estimateResult.series.length;
-      failedSymbolCount = failedEstimateSymbols.size;
-      missingSymbolCount = missingSymbols.size;
       estimateSymbols.forEach((symbol) => {
-        const key = estimateSeriesCacheKey(metricsCachePath, symbol);
+        const key = providerNegativeCacheKey(metricsCachePath, symbol);
         if (missingSymbols.has(symbol) && !failedEstimateSymbols.has(symbol)) {
-          rememberMissingEstimateSeries(key, input.missingEstimateTtlMs);
+          estimateSeriesNegativeCache.rememberMissing(key, input.missingEstimateTtlMs);
         } else if (seriesBySymbol.has(symbol)) {
-          rememberAvailableEstimateSeries(key);
+          estimateSeriesNegativeCache.rememberAvailable(key);
         }
       });
       if (missingSymbols.size > 0) {
@@ -232,13 +206,5 @@ export async function refreshEstimateSeries(
     hasLiveSource,
     hasPartialCoverage,
     hasStaleSource,
-    seriesCount,
-    failedSymbolCount,
-    missingSymbolCount,
-    requestedSymbolCount,
-    batchCount,
-    completedBatchCount,
-    nonEmptyBatchCount,
-    failedBatchCount,
   };
 }

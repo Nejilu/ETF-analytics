@@ -84,9 +84,12 @@ export function holdingsSourceCandidates(
   sourceUrl: string,
   productUrl?: string,
 ): string[] {
-  const candidates = [sourceUrl];
+  const candidates: string[] = [];
 
   try {
+    const productData = productDataCandidate(sourceUrl, productUrl);
+    if (productData) candidates.push(productData);
+    candidates.push(sourceUrl);
     const fallback = new URL(sourceUrl);
     const isLegacyUkDownload =
       fallback.hostname === "www.ishares.com" &&
@@ -99,11 +102,9 @@ export function holdingsSourceCandidates(
         .replace(LEGACY_UK_DOWNLOAD_ID, CURRENT_CH_DOWNLOAD_ID);
       candidates.push(fallback.toString());
     }
-
-    const productData = productDataCandidate(sourceUrl, productUrl);
-    if (productData) candidates.push(productData);
   } catch {
     // The primary URL will produce the actionable fetch error.
+    candidates.push(sourceUrl);
   }
 
   return [...new Set(candidates)];
@@ -120,7 +121,7 @@ export function assertCsvPayload(contentType: string, raw: string): void {
   }
 }
 
-function assertCsvContainsRows(raw: string): void {
+function assertCsvContainsRows(raw: string): number {
   const lines = raw.replace(/^\uFEFF/, "").split(/\r?\n/);
   const headerIndex = lines.findIndex((line) =>
     /^\s*"?ticker"?\s*,\s*"?name"?/i.test(line),
@@ -137,6 +138,7 @@ function assertCsvContainsRows(raw: string): void {
       `iShares returned an incomplete holdings CSV (${dataRows.length} rows).`,
     );
   }
+  return dataRows.length;
 }
 
 function blackrockLatestDate(raw: string): string | null {
@@ -156,14 +158,19 @@ function blackrockLatestDate(raw: string): string | null {
     };
     const date = parsed.componentsByNameMap?.holdings?.containersByNameMap?.all
       ?.dataPointsByNameMap?.dateList?.value;
-    const latest = Array.isArray(date) ? date[0] : undefined;
-    return /^\d{8}$/.test(String(latest ?? "")) ? String(latest) : null;
+    const publishedDates = Array.isArray(date)
+      ? date
+        .map((value) => String(value))
+        .filter((value) => /^\d{8}$/.test(value))
+        .sort()
+      : [];
+    return publishedDates.at(-1) ?? null;
   } catch {
     return null;
   }
 }
 
-function assertBlackrockRows(raw: string): void {
+function assertBlackrockRows(raw: string): number {
   try {
     const parsed = JSON.parse(raw) as {
       componentsByNameMap?: {
@@ -192,6 +199,7 @@ function assertBlackrockRows(raw: string): void {
     ) {
       throw new Error("BlackRock returned no usable holdings rows.");
     }
+    return Math.min(tickers.length, weights.length);
   } catch (error) {
     if (error instanceof Error && error.message.includes("no usable")) {
       throw error;
@@ -201,6 +209,7 @@ function assertBlackrockRows(raw: string): void {
 }
 
 async function fetchBlackrockDatedPayload(
+  etf: Pick<EtfShareClass, "id" | "ticker">,
   sourceUrl: string,
   metadataRaw: string,
   request: (url: string) => Promise<Response>,
@@ -218,14 +227,12 @@ async function fetchBlackrockDatedPayload(
   }
   const raw = await response.text();
   assertCsvPayload(response.headers.get("content-type") ?? "", raw);
-  assertBlackrockRows(raw);
+  assertPlausibleIsharesHoldingsCount(etf, assertBlackrockRows(raw));
   return { raw, sourceUrl: datedUrl.toString() };
 }
 
 export async function fetchIsharesHoldingsFile(
   etf: EtfShareClass,
-  ttlSeconds: number,
-  bypassCache = false,
 ): Promise<IsharesHoldingsFile> {
   const failures: string[] = [];
 
@@ -239,14 +246,11 @@ export async function fetchIsharesHoldingsFile(
               : CSV_ACCEPT_HEADER,
             "User-Agent": "IndexLens/0.1 holdings-research",
           },
-          ...(bypassCache
-            ? { cache: "no-store" as const }
-            : {
-                next: {
-                  revalidate: ttlSeconds,
-                  tags: [`holdings:${etf.id}`],
-                },
-              }),
+          // SQLite is the single 24-hour holdings cache. Reusing Next's
+          // revalidation cache here can return a stale response once and then
+          // persist it with a fresh SQLite timestamp, delaying new holdings by
+          // another full TTL.
+          cache: "no-store",
           signal: AbortSignal.timeout(12_000),
         });
 
@@ -259,9 +263,9 @@ export async function fetchIsharesHoldingsFile(
       const raw = await response.text();
       assertCsvPayload(response.headers.get("content-type") ?? "", raw);
       if (sourceUrl.includes("/varnish-api/") && sourceUrl.includes(BLACKROCK_PRODUCT_DATA_PATH)) {
-        return await fetchBlackrockDatedPayload(sourceUrl, raw, request);
+        return await fetchBlackrockDatedPayload(etf, sourceUrl, raw, request);
       }
-      assertCsvContainsRows(raw);
+      assertPlausibleIsharesHoldingsCount(etf, assertCsvContainsRows(raw));
       return { raw, sourceUrl };
     } catch (error) {
       failures.push(

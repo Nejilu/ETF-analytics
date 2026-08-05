@@ -65,8 +65,27 @@ function mapDerivedHoldings(
   return undefined;
 }
 
+function mapHoldingsSourceEtfId(value: unknown): string | undefined {
+  const candidate =
+    typeof value === "string"
+      ? (() => {
+          try {
+            return JSON.parse(value) as unknown;
+          } catch {
+            return undefined;
+          }
+        })()
+      : value;
+  if (!candidate || typeof candidate !== "object") return undefined;
+  const sourceId = (candidate as Record<string, unknown>).holdingsSourceEtfId;
+  return typeof sourceId === "string" && sourceId.trim()
+    ? sourceId
+    : undefined;
+}
+
 function mapEtfRow(row: typeof etfs.$inferSelect): EtfShareClass {
   const derivedHoldings = mapDerivedHoldings(row.metadataJson);
+  const holdingsSourceEtfId = mapHoldingsSourceEtfId(row.metadataJson);
   return {
     id: row.id,
     ticker: row.ticker,
@@ -90,6 +109,7 @@ function mapEtfRow(row: typeof etfs.$inferSelect): EtfShareClass {
         : "physical",
     portfolioId: row.portfolioId ?? undefined,
     description: row.description ?? undefined,
+    holdingsSourceEtfId,
     derivedHoldings,
     exposureMultiplier:
       derivedHoldings?.model === "scaled-source"
@@ -129,7 +149,7 @@ export function listCatalogGroups(): CatalogGroup[] {
 export function findEtfByTicker(
   ticker: string,
 ): EtfShareClass | undefined {
-  const row = getDb()
+  const candidates = getDb()
     .select()
     .from(etfs)
     .where(
@@ -138,12 +158,13 @@ export function findEtfByTicker(
         eq(etfs.active, true),
       ),
     )
-    .limit(1)
-    .get();
+    .all()
+    .map(mapEtfRow);
 
-  if (!row) return undefined;
-
-  return mapEtfRow(row);
+  return (
+    candidates.find((candidate) => !candidate.holdingsSourceEtfId) ??
+    candidates[0]
+  );
 }
 
 export function findEtfById(id: string): EtfShareClass | undefined {

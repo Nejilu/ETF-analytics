@@ -4,7 +4,6 @@ import {
   MetricsOverviewUnavailableError,
 } from "@/data/services/metrics-overview-service";
 import { metricsOverviewHttpResponse } from "./etag";
-import { metricsOverviewErrorStatus } from "./error-status";
 
 export async function GET(request: Request) {
   const references = new URL(request.url).searchParams
@@ -21,7 +20,7 @@ export async function GET(request: Request) {
   } catch (error) {
     const unavailable = error instanceof MetricsOverviewUnavailableError;
     const invalidRequest = error instanceof MetricsOverviewRequestError;
-    const status = metricsOverviewErrorStatus(unavailable, invalidRequest);
+    const status = invalidRequest ? 400 : unavailable ? 503 : 500;
     return Response.json(
       {
         error: status === 500

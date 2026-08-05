@@ -26,16 +26,14 @@ import {
   MarketPriceUnavailableError,
 } from "@/domain/portfolio";
 import { mapWithConcurrency } from "@/domain/async-utils";
-import {
-  fxRateInFlightKey,
-  marketPriceInFlightKey,
-} from "@/domain/market-price-cache";
 import { valuePortfolioPositions } from "@/domain/processors/value-portfolio";
 import { securityQuoteAlias } from "@/domain/security-equivalence";
 
 const DEFAULT_TTL_SECONDS = 60 * 60 * 24;
 const DEFAULT_CONCURRENCY = 4;
-const yahooFinance = new YahooFinance();
+const yahooFinance = new YahooFinance({
+  suppressNotices: ["yahooSurvey"],
+});
 const inFlightPrices = new Map<string, Promise<MarketPrice>>();
 const inFlightFx = new Map<string, Promise<FxRate>>();
 
@@ -179,7 +177,7 @@ async function getFxRate(currency: string): Promise<FxRate> {
     };
   }
 
-  const key = fxRateInFlightKey(databasePath(), currency);
+  const key = `${databasePath()}::fx:${currency.toUpperCase()}`;
   const existing = inFlightFx.get(key);
   if (existing) return existing;
   const request = refreshFxRate(currency).finally(() => {
@@ -273,7 +271,7 @@ export async function getMarketPrice(
   assetKind: PortfolioAssetKind,
   assetId: string,
 ): Promise<MarketPrice> {
-  const key = marketPriceInFlightKey(databasePath(), assetKind, assetId);
+  const key = `${databasePath()}::${assetKind}:${assetId}`;
   const existing = inFlightPrices.get(key);
   if (existing) return existing;
   const request = refreshMarketPrice(assetKind, assetId)

@@ -21,10 +21,8 @@ import {
   shouldUseCachedSourceMetric,
 } from "@/domain/metrics-cache";
 import {
-  rememberAvailableSourceMetric,
-  rememberMissingSourceMetric,
-  sourceMetricCacheKey,
-  sourceMetricMissingState,
+  providerNegativeCacheKey,
+  sourceMetricNegativeCache,
 } from "@/domain/provider-negative-cache";
 import {
   fetchTradingViewMetrics,
@@ -63,8 +61,8 @@ export function compatibleCachedSourceValues(
   if (!cached || !currentProviderSymbol) return {};
   const values = { ...cached.values };
   for (const definition of SOURCE_METRIC_DEFINITIONS) {
-    const missingNow = sourceMetricMissingState(
-      sourceMetricCacheKey(cachePath, currentProviderSymbol, definition.key),
+    const missingNow = sourceMetricNegativeCache.state(
+      providerNegativeCacheKey(cachePath, currentProviderSymbol, definition.key),
     ) === "fresh";
     if (!shouldUseCachedSourceMetric(
       cached.sourceProviderSymbolByKey.get(definition.key),
@@ -119,9 +117,9 @@ export function prepareScreenerRefresh(
     const providerSymbol = resolvedProviderSymbol(input.providerSymbols.get(holding.securityId));
     const sourceMetricsAreFresh = Boolean(providerSymbol) && SOURCE_METRIC_DEFINITIONS.every(({ key }) => {
       const cacheKey = providerSymbol
-        ? sourceMetricCacheKey(metricsCachePath, providerSymbol, key)
+        ? providerNegativeCacheKey(metricsCachePath, providerSymbol, key)
         : "";
-      const missingState = providerSymbol ? sourceMetricMissingState(cacheKey) : "absent";
+      const missingState = providerSymbol ? sourceMetricNegativeCache.state(cacheKey) : "absent";
       if (missingState === "fresh") {
         sourceMetricCoverageGaps.add(holding.securityId);
         return true;
@@ -344,9 +342,6 @@ export interface RefreshScreenerMetricsResult {
   hasLiveSource: boolean;
   hasPartialCoverage: boolean;
   hasStaleSource: boolean;
-  observationCount: number;
-  failedSymbolCount: number;
-  missingSymbolCount: number;
 }
 
 export class ScreenerRefreshUnavailableError extends Error {
@@ -372,9 +367,6 @@ function emptyResult(
     hasLiveSource: false,
     hasPartialCoverage: hasCoverageGaps,
     hasStaleSource: false,
-    observationCount: 0,
-    failedSymbolCount: 0,
-    missingSymbolCount: 0,
   };
 }
 
@@ -436,9 +428,6 @@ export async function refreshScreenerMetrics(
   let hasLiveSource = false;
   let hasPartialCoverage = false;
   let hasStaleSource = false;
-  let observationCount = 0;
-  let failedSymbolCount = 0;
-  let missingSymbolCount = 0;
 
   try {
     const cachedSecurityIdsBeforeRefresh = new Set(cachedMetrics.keys());
@@ -447,9 +436,6 @@ export async function refreshScreenerMetrics(
     const bySymbol = new Map(observations.map((observation) => [observation.symbol, observation]));
     const failedSymbols = new Set(providerResult.failedSymbols);
     const missingSymbols = new Set(providerResult.missingSymbols);
-    observationCount = observations.length;
-    failedSymbolCount = failedSymbols.size;
-    missingSymbolCount = missingSymbols.size;
     const capturedAt = new Date().toISOString();
     const capturedAtMs = Date.parse(capturedAt);
     const providerSymbolWrites: ProviderSymbolInput[] = [];
@@ -461,8 +447,8 @@ export async function refreshScreenerMetrics(
     for (const symbol of input.requestedSymbols) {
       if (bySymbol.has(symbol) || !missingSymbols.has(symbol) || failedSymbols.has(symbol)) continue;
       for (const definition of SOURCE_METRIC_DEFINITIONS) {
-        rememberMissingSourceMetric(
-          sourceMetricCacheKey(metricsCachePath, symbol, definition.key),
+        sourceMetricNegativeCache.rememberMissing(
+          providerNegativeCacheKey(metricsCachePath, symbol, definition.key),
           input.missingSourceMetricTtlMs,
         );
         negativeCacheWrites.push({
@@ -595,13 +581,13 @@ export async function refreshScreenerMetrics(
         observedMetricCount,
       );
       for (const definition of SOURCE_METRIC_DEFINITIONS) {
-        const cacheKey = sourceMetricCacheKey(
+        const cacheKey = providerNegativeCacheKey(
           metricsCachePath,
           observation.symbol,
           definition.key,
         );
         if (Object.prototype.hasOwnProperty.call(observation.values, definition.key)) {
-          rememberAvailableSourceMetric(cacheKey);
+          sourceMetricNegativeCache.rememberAvailable(cacheKey);
           negativeCacheDeletes.push({
             provider: "tradingview",
             cacheKind: "source_metric",
@@ -610,7 +596,7 @@ export async function refreshScreenerMetrics(
             expiresAt: 0,
           });
         } else {
-          rememberMissingSourceMetric(cacheKey, input.missingSourceMetricTtlMs);
+          sourceMetricNegativeCache.rememberMissing(cacheKey, input.missingSourceMetricTtlMs);
           negativeCacheWrites.push({
             provider: "tradingview",
             cacheKind: "source_metric",
@@ -693,8 +679,5 @@ export async function refreshScreenerMetrics(
     hasLiveSource,
     hasPartialCoverage,
     hasStaleSource,
-    observationCount,
-    failedSymbolCount,
-    missingSymbolCount,
   };
 }

@@ -675,9 +675,19 @@ export function ComparisonWorkbench({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState<string[]>([]);
-  const availableEtfs = useMemo(
-    () => availableCatalog.flatMap((group) => group.variants),
+  const researchCatalog = useMemo(
+    () =>
+      availableCatalog
+        .map((group) => ({
+          ...group,
+          variants: group.variants.filter((etf) => !etf.holdingsSourceEtfId),
+        }))
+        .filter((group) => group.variants.length > 0),
     [availableCatalog],
+  );
+  const availableEtfs = useMemo(
+    () => researchCatalog.flatMap((group) => group.variants),
+    [researchCatalog],
   );
   const leftEtf = availableEtfs.find((etf) => etf.id === leftEtfId);
   const rightEtf = availableEtfs.find((etf) => etf.id === rightEtfId);
@@ -887,14 +897,14 @@ export function ComparisonWorkbench({
             <FundSelector
               side="left"
               etfId={leftEtfId}
-              catalog={availableCatalog}
+              catalog={researchCatalog}
               onEtfChange={(_, value) => setLeftEtfId(value)}
             />
             <div className="versus" aria-hidden="true"><span>VS</span></div>
             <FundSelector
               side="right"
               etfId={rightEtfId}
-              catalog={availableCatalog}
+              catalog={researchCatalog}
               onEtfChange={(_, value) => setRightEtfId(value)}
             />
             <div className="builder-action">
@@ -1020,12 +1030,12 @@ export function ComparisonWorkbench({
             />
           ) : workspaceView === "creator" ? (
             <EtfCreator
-              catalog={availableCatalog}
+              catalog={researchCatalog}
               onCatalogChanged={refreshCatalog}
             />
           ) : (
             <MetricsOverview
-              catalog={availableCatalog}
+              catalog={researchCatalog}
               initialEtfIds={[leftEtfId, rightEtfId]}
             />
           )}

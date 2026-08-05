@@ -248,6 +248,21 @@ async function buildDerivedEtfSnapshot(
   }
 }
 
+async function buildSharedHoldingsSnapshot(
+  etf: NonNullable<ReturnType<typeof findEtfByReference>>,
+): Promise<HoldingsSnapshot> {
+  const sourceEtfId = etf.holdingsSourceEtfId;
+  if (!sourceEtfId || sourceEtfId === etf.id) {
+    throw new Error(`Invalid shared holdings source for ${etf.ticker}.`);
+  }
+
+  const source = await getHoldingsSnapshot(sourceEtfId);
+  return {
+    ...source,
+    etf,
+  };
+}
+
 async function refreshHoldings(
   etf: NonNullable<ReturnType<typeof findEtfByReference>>,
 ): Promise<HoldingsSnapshot> {
@@ -265,6 +280,9 @@ async function refreshHoldings(
       "cached",
       cacheTtlSeconds() / 3600,
     );
+  }
+  if (etf.holdingsSourceEtfId) {
+    return buildSharedHoldingsSnapshot(etf);
   }
   if (etf.derivedHoldings) {
     return buildDerivedEtfSnapshot(etf);
@@ -290,15 +308,10 @@ async function refreshHoldings(
   }
 
   try {
-    const fetched = await fetchIsharesHoldingsFile(
-      etf,
-      ttlSeconds,
-      // A legacy normalization still needs to be parsed again, but it does
-      // not require bypassing the HTTP cache. Keep no-store for the separate
-      // incomplete-snapshot recovery path so an outage cannot turn every
-      // request into an unconditional download attempt.
-      Boolean(latest && !latestIsPlausible),
-    );
+    // The persisted snapshot is the only TTL boundary. Once it expires, the
+    // provider request must be fresh or an old Next fetch-cache response can
+    // be written back with a new fetchedAt timestamp.
+    const fetched = await fetchIsharesHoldingsFile(etf);
     const parsed = parseIsharesHoldingsCsv(fetched.raw);
     assertPlausibleIsharesHoldingsCount(etf, parsed.holdings.length);
     const fetchedAt = new Date().toISOString();

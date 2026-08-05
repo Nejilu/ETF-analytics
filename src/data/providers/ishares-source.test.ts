@@ -66,7 +66,11 @@ test("prefers the identified dated BlackRock response over the identifier-poor C
     componentsByNameMap: {
       holdings: {
         containersByNameMap: {
-          all: { dataPointsByNameMap: { dateList: { value: [20260731] } } },
+          all: {
+            dataPointsByNameMap: {
+              dateList: { value: [20260731, 20260804] },
+            },
+          },
         },
       },
     },
@@ -86,9 +90,11 @@ test("prefers the identified dated BlackRock response over the identifier-poor C
     },
   });
 
-  globalThis.fetch = (async (input) => {
+  globalThis.fetch = (async (input, init) => {
     const url = String(input);
     calls.push(url);
+    assert.equal(init?.cache, "no-store");
+    assert.equal("next" in (init ?? {}), false);
     if (!url.includes("asOfDate=")) {
       return new Response(metadata, {
         headers: { "content-type": "application/json" },
@@ -100,8 +106,8 @@ test("prefers the identified dated BlackRock response over the identifier-poor C
   }) as typeof fetch;
 
   try {
-    const result = await fetchIsharesHoldingsFile(etf, 3_600, true);
-    assert.equal(result.sourceUrl.endsWith("asOfDate=20260731"), true);
+    const result = await fetchIsharesHoldingsFile(etf);
+    assert.equal(result.sourceUrl.endsWith("asOfDate=20260804"), true);
     assert.equal(calls.length, 2);
     assert.equal(calls.includes(primaryUrl), false);
   } finally {
@@ -139,7 +145,7 @@ test("falls back to the official CSV when BlackRock product data is unavailable"
   }) as typeof fetch;
 
   try {
-    const result = await fetchIsharesHoldingsFile(etf, 3_600, true);
+    const result = await fetchIsharesHoldingsFile(etf);
     assert.equal(result.sourceUrl, primaryUrl);
     assert.equal(calls.length, 2);
   } finally {
@@ -199,7 +205,7 @@ test("tries the next official source when BlackRock data is implausibly short", 
   }) as typeof fetch;
 
   try {
-    const result = await fetchIsharesHoldingsFile(etf, 3_600, true);
+    const result = await fetchIsharesHoldingsFile(etf);
     assert.equal(result.sourceUrl, primaryUrl);
   } finally {
     globalThis.fetch = originalFetch;

@@ -24,6 +24,27 @@ export const ETF_CATALOG: CatalogGroup[] = [
         holdingsUrl:
           "https://www.ishares.com/us/products/239726/ishares-core-s-p-500-etf/latest-holdings.csv",
       },
+      {
+        id: "cspx-ucits",
+        ticker: "CSPX",
+        name: "iShares Core S&P 500 UCITS ETF USD (Acc)",
+        benchmarkId: "sp-500",
+        isin: "IE00B5BMR087",
+        wrapper: "UCITS",
+        domicile: "Ireland",
+        exchange: "London Stock Exchange",
+        tradingCurrency: "USD",
+        distributionPolicy: "Accumulating",
+        ter: 0.07,
+        productUrl:
+          "https://www.ishares.com/uk/individual/en/products/253743/cspx",
+        holdingsUrl:
+          "https://www.ishares.com/us/products/239726/ishares-core-s-p-500-etf/latest-holdings.csv",
+        priceSymbol: "CSPX.L",
+        holdingsSourceEtfId: "ivv-us",
+        description:
+          "Portfolio-only accumulating share class: CSPX.L supplies its own unit price while look-through exposure reuses the supported IVV holdings snapshot.",
+      },
     ],
   },
   {
@@ -77,6 +98,27 @@ export const ETF_CATALOG: CatalogGroup[] = [
         holdingsUrl:
           "https://www.ishares.com/us/products/239696/ishares-msci-world-etf/latest-holdings.csv",
       },
+      {
+        id: "swda-ucits",
+        ticker: "SWDA",
+        name: "iShares Core MSCI World UCITS ETF USD (Acc)",
+        benchmarkId: "msci-world",
+        isin: "IE00B4L5Y983",
+        wrapper: "UCITS",
+        domicile: "Ireland",
+        exchange: "London Stock Exchange",
+        tradingCurrency: "GBP",
+        distributionPolicy: "Accumulating",
+        ter: 0.2,
+        productUrl:
+          "https://www.ishares.com/uk/individual/en/products/251882/ishares-core-msci-world-ucits-etf",
+        holdingsUrl:
+          "https://www.ishares.com/us/products/239696/ishares-msci-world-etf/latest-holdings.csv",
+        priceSymbol: "SWDA.L",
+        holdingsSourceEtfId: "urth-us",
+        description:
+          "Portfolio-only accumulating share class: SWDA.L supplies its own unit price while look-through exposure reuses the supported URTH holdings snapshot.",
+      },
     ],
   },
   {
@@ -101,6 +143,27 @@ export const ETF_CATALOG: CatalogGroup[] = [
         productUrl: "https://www.ishares.com/us/products/239600/ACWI",
         holdingsUrl:
           "https://www.ishares.com/us/products/239600/ishares-msci-acwi-etf/latest-holdings.csv",
+      },
+      {
+        id: "ssac-ucits",
+        ticker: "SSAC",
+        name: "iShares MSCI ACWI UCITS ETF USD (Acc)",
+        benchmarkId: "msci-acwi",
+        isin: "IE00B6R52259",
+        wrapper: "UCITS",
+        domicile: "Ireland",
+        exchange: "London Stock Exchange",
+        tradingCurrency: "GBP",
+        distributionPolicy: "Accumulating",
+        ter: 0.2,
+        productUrl:
+          "https://www.ishares.com/uk/individual/en/products/251850/ishares-msci-acwi-ucits-etf",
+        holdingsUrl:
+          "https://www.ishares.com/us/products/239600/ishares-msci-acwi-etf/latest-holdings.csv",
+        priceSymbol: "SSAC.L",
+        holdingsSourceEtfId: "acwi-us",
+        description:
+          "Portfolio-only accumulating share class: SSAC.L supplies its own unit price while look-through exposure reuses the supported ACWI holdings snapshot.",
       },
     ],
   },
@@ -221,6 +284,27 @@ export const ETF_CATALOG: CatalogGroup[] = [
         productUrl: "https://www.ishares.com/us/products/244050/IEMG",
         holdingsUrl:
           "https://www.ishares.com/us/products/244050/ishares-core-msci-emerging-markets-etf/latest-holdings.csv",
+      },
+      {
+        id: "eimi-ucits",
+        ticker: "EIMI",
+        name: "iShares Core MSCI Emerging Markets IMI UCITS ETF USD (Acc)",
+        benchmarkId: "msci-em-imi",
+        isin: "IE00BKM4GZ66",
+        wrapper: "UCITS",
+        domicile: "Ireland",
+        exchange: "London Stock Exchange",
+        tradingCurrency: "USD",
+        distributionPolicy: "Accumulating",
+        ter: 0.18,
+        productUrl:
+          "https://www.ishares.com/uk/individual/en/products/264659/eimi",
+        holdingsUrl:
+          "https://www.ishares.com/us/products/244050/ishares-core-msci-emerging-markets-etf/latest-holdings.csv",
+        priceSymbol: "EIMI.L",
+        holdingsSourceEtfId: "iemg-us",
+        description:
+          "Portfolio-only accumulating share class: EIMI.L supplies its own unit price while look-through exposure reuses the supported IEMG holdings snapshot.",
       },
     ],
   },
@@ -353,6 +437,27 @@ export const ETF_CATALOG: CatalogGroup[] = [
           "https://www.ishares.com/us/products/351653/ishares-nasdaq-100-etf/latest-holdings.csv",
       },
       {
+        id: "cndx-ucits",
+        ticker: "CNDX",
+        name: "iShares Nasdaq 100 UCITS ETF USD (Acc)",
+        benchmarkId: "nasdaq-100",
+        isin: "IE00B53SZB19",
+        wrapper: "UCITS",
+        domicile: "Ireland",
+        exchange: "London Stock Exchange",
+        tradingCurrency: "USD",
+        distributionPolicy: "Accumulating",
+        ter: 0.3,
+        productUrl:
+          "https://www.ishares.com/uk/individual/en/products/253741/ishares-nasdaq-100-ucits-etf-acc-fund",
+        holdingsUrl:
+          "https://www.ishares.com/us/products/351653/ishares-nasdaq-100-etf/latest-holdings.csv",
+        priceSymbol: "CNDX.L",
+        holdingsSourceEtfId: "iqq-us",
+        description:
+          "Portfolio-only accumulating share class: CNDX.L supplies its own unit price while look-through exposure reuses the supported IQQ holdings snapshot.",
+      },
+      {
         id: "qld-us",
         ticker: "QLD",
         name: "ProShares Ultra QQQ",
@@ -439,6 +544,27 @@ export const ETF_CATALOG: CatalogGroup[] = [
         holdingsUrl:
           "https://www.ishares.com/us/products/339775/ishares-nasdaq-top-30-stocks-etf/latest-holdings.csv",
         priceSymbol: "QTOP",
+      },
+      {
+        id: "qtop-ucits",
+        ticker: "QTOP",
+        name: "iShares Nasdaq 100 Top 30 UCITS ETF USD (Acc)",
+        benchmarkId: "nasdaq-100-top-30",
+        isin: "IE000Z7P04F4",
+        wrapper: "UCITS",
+        domicile: "Ireland",
+        exchange: "Euronext Amsterdam",
+        tradingCurrency: "USD",
+        distributionPolicy: "Accumulating",
+        ter: 0.3,
+        productUrl:
+          "https://www.ishares.com/uk/individual/en/products/340307/ishares-nasdaq-100-top-30-ucits-etf",
+        holdingsUrl:
+          "https://www.ishares.com/us/products/339775/ishares-nasdaq-top-30-stocks-etf/latest-holdings.csv",
+        priceSymbol: "QTOP.AS",
+        holdingsSourceEtfId: "qtop-us",
+        description:
+          "Portfolio-only accumulating share class: QTOP.AS supplies its own unit price while look-through exposure reuses the supported US QTOP holdings snapshot.",
       },
     ],
   },

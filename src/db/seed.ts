@@ -16,12 +16,6 @@ import {
 const RETIRED_ETF_IDS = [
   "iwm-us",
   "iusn-ucits",
-  "qtop-ucits",
-  "cndx-ucits",
-  "cspx-ucits",
-  "eimi-ucits",
-  "ssac-ucits",
-  "swda-ucits",
 ] as const;
 const RETIRED_BENCHMARK_ID = "russell-2000";
 
@@ -177,7 +171,11 @@ export function seedCatalog(): void {
             portfolioId: null,
             description: etf.description ?? null,
             active: true,
-            metadataJson: etf.derivedHoldings ?? null,
+            metadataJson:
+              etf.derivedHoldings ??
+              (etf.holdingsSourceEtfId
+                ? { holdingsSourceEtfId: etf.holdingsSourceEtfId }
+                : null),
           })
           .onConflictDoUpdate({
             target: etfs.id,
@@ -202,7 +200,11 @@ export function seedCatalog(): void {
               portfolioId: null,
               description: etf.description ?? null,
               active: true,
-              metadataJson: etf.derivedHoldings ?? null,
+              metadataJson:
+                etf.derivedHoldings ??
+                (etf.holdingsSourceEtfId
+                  ? { holdingsSourceEtfId: etf.holdingsSourceEtfId }
+                  : null),
               updatedAt: sql`CURRENT_TIMESTAMP`,
             },
           })

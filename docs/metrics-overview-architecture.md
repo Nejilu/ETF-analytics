@@ -39,6 +39,9 @@ Responsabilités :
 - Chaque candidat est contrôlé avec le seuil de plausibilité propre à l’ETF ;
   un payload trop court passe réellement au candidat suivant au lieu d’être
   retéléchargé une seconde fois.
+- Le snapshot SQLite est l’unique cache de holdings. Après expiration de son
+  TTL, BlackRock/iShares est appelé avec `no-store` afin qu’une réponse périmée
+  du cache de revalidation Next.js ne puisse pas renouveler `fetchedAt`.
 - L’identité canonique suit ISIN, SEDOL, CUSIP, puis un secours nom+ticker. Les
   références historiques sont réconciliées transactionnellement à l’ingestion.
 - Le hash `ishares-holdings-v3:` force une relecture contrôlée des snapshots

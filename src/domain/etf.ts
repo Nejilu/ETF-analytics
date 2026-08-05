@@ -59,6 +59,11 @@ export interface EtfShareClass {
   fundType?: EtfFundType;
   portfolioId?: string;
   description?: string;
+  /**
+   * Portfolio-only share class whose unit price is quoted independently while
+   * its look-through exposure reuses the canonical source ETF snapshot.
+   */
+  holdingsSourceEtfId?: string;
   derivedHoldings?: DerivedHoldingsDefinition;
   exposureMultiplier?: number;
 }

@@ -191,8 +191,10 @@ browser assets as well as its API routes.
   Legacy `NAME:*` identities are transactionally reconciled only when one
   unambiguous listing or strong-identifier target exists; holdings, provider
   mappings, metrics, prices and portfolio positions are repointed together.
-- Reuse snapshots for 24 hours and return the latest persisted snapshot as
-  stale data when iShares is temporarily unavailable.
+- Reuse SQLite snapshots for 24 hours and return the latest persisted snapshot
+  as stale data when iShares is temporarily unavailable. SQLite is the only
+  holdings cache: after expiry, the provider request uses `no-store` so an old
+  Next.js revalidation response cannot renew a stale snapshot.
 - Use a pure, reusable processor for weighted overlap and active sleeves.
 - Rank security-level active weights independently for either ETF.
 - Build and persist a mixed ETF/direct-stock portfolio, using ACWI holdings as
@@ -200,6 +202,11 @@ browser assets as well as its API routes.
   number of shares.
 - Persist Yahoo Finance market prices and FX conversions for 24 hours, with the
   latest stored quote used as a stale fallback when a refresh fails.
+- Offer accumulating iShares share classes in Portfolio only. Each keeps its own
+  Yahoo unit-price symbol while reusing the canonical distributing ETF holdings
+  snapshot, so no duplicate iShares holdings download or snapshot is created.
+- Label iShares selector entries by underlying index, distribution policy and a
+  final parenthesized ticker, rather than by the issuer product name.
 - Expand every ETF sleeve, merge duplicate direct and indirect exposures, and
   rank the resulting synthetic portfolio at security level.
 - Save the share-based portfolio definition as a reusable local ETF. Its
@@ -267,8 +274,9 @@ drizzle/                committed SQL migrations
 
 The catalog is seeded from the versioned source manifest. Holdings are fetched
 on first access, validated, deduplicated and inserted transactionally. Later
-requests read SQLite first; iShares is contacted only after the configured TTL
-expires. If refresh fails, the latest persisted snapshot remains available.
+requests read SQLite first; iShares is contacted with a fresh `no-store`
+request only after the configured TTL expires. If refresh fails, the latest
+persisted snapshot remains available.
 HTTP 503 is returned only when no snapshot has ever been stored for the ETF.
 
 No demonstration holdings dataset is included. Each installation builds its

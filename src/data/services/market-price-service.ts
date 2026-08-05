@@ -31,7 +31,9 @@ import { securityQuoteAlias } from "@/domain/security-equivalence";
 
 const DEFAULT_TTL_SECONDS = 60 * 60 * 24;
 const DEFAULT_CONCURRENCY = 4;
-const yahooFinance = new YahooFinance();
+const yahooFinance = new YahooFinance({
+  suppressNotices: ["yahooSurvey"],
+});
 const inFlightPrices = new Map<string, Promise<MarketPrice>>();
 const inFlightFx = new Map<string, Promise<FxRate>>();
 

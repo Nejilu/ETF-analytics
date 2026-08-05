@@ -1,0 +1,43 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { etfSelectorLabel } from "@/components/dashboard/etf-search";
+import { ETF_CATALOG, getEtfById } from "@/data/catalog";
+
+const accumulatingVariants = [
+  ["cspx-ucits", "ivv-us", "CSPX.L"],
+  ["swda-ucits", "urth-us", "SWDA.L"],
+  ["ssac-ucits", "acwi-us", "SSAC.L"],
+  ["eimi-ucits", "iemg-us", "EIMI.L"],
+  ["cndx-ucits", "iqq-us", "CNDX.L"],
+  ["qtop-ucits", "qtop-us", "QTOP.AS"],
+] as const;
+
+test("portfolio accumulating variants reuse canonical holdings and keep distinct quotes", () => {
+  for (const [variantId, sourceId, priceSymbol] of accumulatingVariants) {
+    const variant = getEtfById(variantId);
+    const source = getEtfById(sourceId);
+    assert.ok(variant, variantId);
+    assert.ok(source, sourceId);
+    assert.equal(variant.distributionPolicy, "Accumulating");
+    assert.equal(variant.holdingsSourceEtfId, sourceId);
+    assert.equal(variant.priceSymbol, priceSymbol);
+    assert.notEqual(variant.priceSymbol, source.priceSymbol ?? source.ticker);
+    assert.equal(variant.holdingsUrl, source.holdingsUrl);
+  }
+});
+
+test("iShares selector labels lead with the underlying index and end with ticker", () => {
+  const sp500 = ETF_CATALOG.find((group) => group.id === "sp-500");
+  assert.ok(sp500);
+  const ivv = getEtfById("ivv-us");
+  const cspx = getEtfById("cspx-ucits");
+  const qld = getEtfById("qld-us");
+  assert.ok(ivv);
+  assert.ok(cspx);
+  assert.ok(qld);
+
+  assert.equal(etfSelectorLabel(sp500.name, ivv), "S&P 500 - Dist (IVV)");
+  assert.equal(etfSelectorLabel(sp500.name, cspx), "S&P 500 - Acc (CSPX)");
+  assert.equal(etfSelectorLabel("Nasdaq-100", qld), "ProShares Ultra QQQ (QLD)");
+});

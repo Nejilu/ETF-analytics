@@ -15,8 +15,23 @@ function normalized(value: string): string {
   return value.trim().toLocaleUpperCase("en-US");
 }
 
-function selectedLabel(etf: EtfShareClass | undefined): string {
-  return etf ? `${etf.ticker} · ${etf.name}` : "";
+function isIshares(etf: EtfShareClass): boolean {
+  return (etf.issuer ?? "iShares").toLocaleLowerCase("en-US") === "ishares";
+}
+
+function distributionLabel(etf: EtfShareClass): string {
+  if (etf.distributionPolicy === "Accumulating") return "Acc";
+  if (etf.distributionPolicy === "Distributing") return "Dist";
+  return etf.distributionPolicy;
+}
+
+export function etfSelectorLabel(
+  benchmarkName: string,
+  etf: EtfShareClass,
+): string {
+  return isIshares(etf)
+    ? `${benchmarkName} - ${distributionLabel(etf)} (${etf.ticker})`
+    : `${etf.name} (${etf.ticker})`;
 }
 
 function wrapperLabel(etf: EtfShareClass): string {
@@ -40,8 +55,10 @@ export function EtfSearch({
       ),
     [catalog],
   );
-  const selected = options.find((option) => option.etf.id === selectedId)?.etf;
-  const currentLabel = selectedLabel(selected);
+  const selected = options.find((option) => option.etf.id === selectedId);
+  const currentLabel = selected
+    ? etfSelectorLabel(selected.benchmark.name, selected.etf)
+    : "";
   const [query, setQuery] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const displayedQuery = query ?? currentLabel;
@@ -135,9 +152,9 @@ export function EtfSearch({
                   onSelect(etf.id);
                 }}
               >
-                <strong>{etf.ticker}</strong>
-                <span>{etf.name}</span>
-                <small>{benchmark.name} · {wrapperLabel(etf)}</small>
+                <strong>{etfSelectorLabel(benchmark.name, etf)}</strong>
+                <span>{etf.issuer ?? "iShares"} - {etf.exchange}</span>
+                <small>{wrapperLabel(etf)} - {etf.tradingCurrency}</small>
               </button>
             ))
           ) : (

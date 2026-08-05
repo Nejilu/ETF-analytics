@@ -158,8 +158,13 @@ function blackrockLatestDate(raw: string): string | null {
     };
     const date = parsed.componentsByNameMap?.holdings?.containersByNameMap?.all
       ?.dataPointsByNameMap?.dateList?.value;
-    const latest = Array.isArray(date) ? date[0] : undefined;
-    return /^\d{8}$/.test(String(latest ?? "")) ? String(latest) : null;
+    const publishedDates = Array.isArray(date)
+      ? date
+        .map((value) => String(value))
+        .filter((value) => /^\d{8}$/.test(value))
+        .sort()
+      : [];
+    return publishedDates.at(-1) ?? null;
   } catch {
     return null;
   }
@@ -228,8 +233,6 @@ async function fetchBlackrockDatedPayload(
 
 export async function fetchIsharesHoldingsFile(
   etf: EtfShareClass,
-  ttlSeconds: number,
-  bypassCache = false,
 ): Promise<IsharesHoldingsFile> {
   const failures: string[] = [];
 
@@ -243,14 +246,11 @@ export async function fetchIsharesHoldingsFile(
               : CSV_ACCEPT_HEADER,
             "User-Agent": "IndexLens/0.1 holdings-research",
           },
-          ...(bypassCache
-            ? { cache: "no-store" as const }
-            : {
-                next: {
-                  revalidate: ttlSeconds,
-                  tags: [`holdings:${etf.id}`],
-                },
-              }),
+          // SQLite is the single 24-hour holdings cache. Reusing Next's
+          // revalidation cache here can return a stale response once and then
+          // persist it with a fresh SQLite timestamp, delaying new holdings by
+          // another full TTL.
+          cache: "no-store",
           signal: AbortSignal.timeout(12_000),
         });
 

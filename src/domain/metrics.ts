@@ -200,6 +200,24 @@ export interface WeightedMetric {
   totalHoldings: number;
 }
 
+export const CONSENSUS_HORIZONS = ["4q", "2q", "1q"] as const;
+
+export type ConsensusHorizon = (typeof CONSENSUS_HORIZONS)[number];
+
+export interface ConsensusAggregate {
+  value: number | null;
+  coverageWeight: number;
+  coveredHoldings: number;
+  totalHoldings: number;
+}
+
+export interface ConsensusWindowView {
+  quarters: 1 | 2 | 4;
+  annualizationFactor: 1 | 2 | 4;
+  valuationPath: ConsensusAggregate[];
+  growth: ConsensusAggregate;
+}
+
 export interface ComponentValuationPoint {
   /** Stable v1 identity fields retained for existing API consumers. */
   securityId: string;
@@ -249,6 +267,7 @@ export interface EtfMetricsOverview {
   mappedHoldings: number;
   mappingCoverageWeight: number;
   metrics: WeightedMetric[];
+  consensusWindows: Record<ConsensusHorizon, ConsensusWindowView>;
   componentValuation: ComponentValuationView;
 }
 

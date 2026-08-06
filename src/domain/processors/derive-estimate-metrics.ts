@@ -1,4 +1,9 @@
-import { DERIVED_METRIC_KEYS, type MetricKey, type SecurityEstimateSeries } from "@/domain/metrics";
+import {
+  DERIVED_METRIC_KEYS,
+  type ConsensusHorizon,
+  type MetricKey,
+  type SecurityEstimateSeries,
+} from "@/domain/metrics";
 
 const WINDOW_KEYS = [
   "pe_estimate_window_0",
@@ -12,26 +17,73 @@ function positive(value: number): boolean {
   return Number.isFinite(value) && value > 0;
 }
 
+export interface DerivedConsensusWindow {
+  quarters: 1 | 2 | 4;
+  annualizationFactor: 1 | 2 | 4;
+  annualizedEpsPath: number[];
+  pePath: Array<number | null>;
+  historicalAnnualizedEps: number;
+  forwardAnnualizedEps: number;
+  growth: number | null;
+}
+
+export function consensusQuarters(horizon: ConsensusHorizon): 1 | 2 | 4 {
+  if (horizon === "1q") return 1;
+  if (horizon === "2q") return 2;
+  return 4;
+}
+
+/**
+ * Builds comparable annual EPS windows around the latest reported quarter.
+ * A two-quarter window is multiplied by two and a single quarter by four, so
+ * every resulting P/E remains expressed on an annual basis.
+ */
+export function deriveConsensusWindow(
+  series: SecurityEstimateSeries,
+  quarters: 1 | 2 | 4,
+): DerivedConsensusWindow | null {
+  if (series.points.length !== 8 || !positive(series.price)) return null;
+  const estimates = series.points.map((point) => point.estimate);
+  if (estimates.some((estimate) => !Number.isFinite(estimate))) return null;
+
+  const annualizationFactor = (4 / quarters) as 1 | 2 | 4;
+  const firstWindowStart = 4 - quarters;
+  const annualizedEpsPath = Array.from({ length: quarters + 1 }, (_, offset) =>
+    estimates
+      .slice(firstWindowStart + offset, firstWindowStart + offset + quarters)
+      .reduce((sum, estimate) => sum + estimate, 0) * annualizationFactor);
+  const pePath = annualizedEpsPath.map((annualizedEps) =>
+    positive(annualizedEps) ? series.price / annualizedEps : null);
+  const historicalAnnualizedEps = annualizedEpsPath[0];
+  const forwardAnnualizedEps = annualizedEpsPath[annualizedEpsPath.length - 1];
+  const growth = positive(historicalAnnualizedEps) && positive(forwardAnnualizedEps)
+    ? (forwardAnnualizedEps / historicalAnnualizedEps - 1) * 100
+    : null;
+
+  return {
+    quarters,
+    annualizationFactor,
+    annualizedEpsPath,
+    pePath,
+    historicalAnnualizedEps,
+    forwardAnnualizedEps,
+    growth,
+  };
+}
+
 export function deriveEstimateSeriesMetrics(
   series: SecurityEstimateSeries,
 ): Partial<Record<MetricKey, number>> {
-  if (series.points.length !== 8 || !positive(series.price)) return {};
-  const estimates = series.points.map((point) => point.estimate);
-  if (estimates.some((estimate) => !Number.isFinite(estimate))) return {};
+  const consensus = deriveConsensusWindow(series, 4);
+  if (!consensus) return {};
   const values: Partial<Record<MetricKey, number>> = {};
 
   WINDOW_KEYS.forEach((key, index) => {
-    const fourQuarterEps = estimates
-      .slice(index, index + 4)
-      .reduce((sum, estimate) => sum + estimate, 0);
-    if (positive(fourQuarterEps)) values[key] = series.price / fourQuarterEps;
+    const pe = consensus.pePath[index];
+    if (pe !== null) values[key] = pe;
   });
 
-  const historical = estimates.slice(0, 4).reduce((sum, estimate) => sum + estimate, 0);
-  const forward = estimates.slice(4, 8).reduce((sum, estimate) => sum + estimate, 0);
-  if (positive(historical) && positive(forward)) {
-    values.eps_growth_estimate_forward_4q = (forward / historical - 1) * 100;
-  }
+  if (consensus.growth !== null) values.eps_growth_estimate_forward_4q = consensus.growth;
   return values;
 }
 

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { Holding } from "@/domain/etf";
-import type { SecurityMetricValues } from "@/domain/metrics";
-import { aggregateEtfMetrics } from "./aggregate-etf-metrics";
+import type { SecurityEstimateSeries, SecurityMetricValues } from "@/domain/metrics";
+import { aggregateConsensusWindow, aggregateEtfMetrics } from "./aggregate-etf-metrics";
 
 function holding(securityId: string, weight: number, assetClass = "Equity"): Holding {
   return {
@@ -14,6 +14,25 @@ function holding(securityId: string, weight: number, assetClass = "Equity"): Hol
     assetClass,
     country: "United States",
     weight,
+  };
+}
+
+function estimateSeries(
+  providerSymbol: string,
+  historicalEstimate: number,
+  forwardEstimate: number,
+): SecurityEstimateSeries {
+  return {
+    providerSymbol,
+    currency: "USD",
+    price: 100,
+    points: Array.from({ length: 8 }, (_, index) => ({
+      fiscalPeriod: `${index < 4 ? "2025" : "2026"}-Q${(index % 4) + 1}`,
+      estimate: index < 4 ? historicalEstimate : forwardEstimate,
+      isHistorical: index < 4,
+      estimateDate: null,
+      analystCount: 10,
+    })),
   };
 }
 
@@ -130,4 +149,35 @@ test("returns no aggregate growth when every historical or forward P/E is zero",
   assert.equal(result?.value, null);
   assert.equal(result?.coverageWeight, 0);
   assert.equal(result?.coveredHoldings, 0);
+});
+
+test("aggregates annualized one-quarter consensus with common growth coverage", () => {
+  const values = new Map<string, SecurityMetricValues>([
+    ["A", {
+      securityId: "A",
+      providerSymbol: "NASDAQ:A",
+      values: {},
+      estimateSeries: estimateSeries("NASDAQ:A", 2, 3),
+    }],
+    ["B", {
+      securityId: "B",
+      providerSymbol: "NYSE:B",
+      values: {},
+      estimateSeries: estimateSeries("NYSE:B", 1, 2),
+    }],
+  ]);
+  const result = aggregateConsensusWindow(
+    [holding("A", 60), holding("B", 20), holding("MISSING", 20)],
+    values,
+    1,
+  );
+
+  assert.equal(result.annualizationFactor, 4);
+  assert.equal(result.valuationPath.length, 2);
+  assert.ok(Math.abs((result.valuationPath[0].value ?? 0) - 80 / 5.6) < 1e-9);
+  assert.ok(Math.abs((result.valuationPath[1].value ?? 0) - 80 / 8.8) < 1e-9);
+  assert.ok(Math.abs((result.growth.value ?? 0) - (8.8 / 5.6 - 1) * 100) < 1e-9);
+  assert.equal(result.growth.coverageWeight, 80);
+  assert.equal(result.growth.coveredHoldings, 2);
+  assert.equal(result.growth.totalHoldings, 3);
 });

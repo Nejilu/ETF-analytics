@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { SecurityEstimateSeries } from "@/domain/metrics";
 import {
+  deriveConsensusWindow,
   deriveEstimateSeriesMetrics,
   replaceDerivedMetrics,
 } from "./derive-estimate-metrics";
@@ -49,6 +50,26 @@ test("keeps local-currency price and EPS internally consistent", () => {
   const result = deriveEstimateSeriesMetrics(twse);
   assert.equal(result.pe_estimate_window_0, 2425 / (15 + 17 + 19 + 21));
   assert.equal(result.pe_estimate_window_4, 2425 / (23 + 25 + 27 + 29));
+});
+
+test("annualizes rolling two-quarter and one-quarter consensus windows", () => {
+  const simple: SecurityEstimateSeries = {
+    ...msft,
+    price: 120,
+    points: msft.points.map((point, index) => ({ ...point, estimate: index + 1 })),
+  };
+  const twoQuarter = deriveConsensusWindow(simple, 2);
+  const oneQuarter = deriveConsensusWindow(simple, 1);
+
+  assert.deepEqual(twoQuarter?.annualizedEpsPath, [14, 18, 22]);
+  assert.deepEqual(twoQuarter?.pePath, [120 / 14, 120 / 18, 120 / 22]);
+  assert.ok(Math.abs((twoQuarter?.growth ?? 0) - (22 / 14 - 1) * 100) < 1e-9);
+  assert.equal(twoQuarter?.annualizationFactor, 2);
+
+  assert.deepEqual(oneQuarter?.annualizedEpsPath, [16, 20]);
+  assert.deepEqual(oneQuarter?.pePath, [7.5, 6]);
+  assert.equal(oneQuarter?.growth, 25);
+  assert.equal(oneQuarter?.annualizationFactor, 4);
 });
 
 test("removes cached derived values that a fresh series no longer supports", () => {

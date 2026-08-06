@@ -1,7 +1,96 @@
-import { METRIC_DEFINITIONS, type SecurityMetricValues, type WeightedMetric } from "@/domain/metrics";
+import {
+  METRIC_DEFINITIONS,
+  type ConsensusAggregate,
+  type ConsensusWindowView,
+  type SecurityMetricValues,
+  type WeightedMetric,
+} from "@/domain/metrics";
 import type { Holding } from "@/domain/etf";
+import { deriveConsensusWindow } from "./derive-estimate-metrics";
 
 const EARNINGS_GROWTH_KEY = "eps_growth_estimate_forward_4q";
+
+function aggregateHarmonicPe(
+  eligible: Holding[],
+  totalWeight: number,
+  peBySecurity: ReadonlyMap<string, number | null>,
+): ConsensusAggregate {
+  const covered = eligible.flatMap((holding) => {
+    const pe = peBySecurity.get(holding.securityId);
+    return typeof pe === "number" && Number.isFinite(pe) && pe > 0
+      ? [{ holding, pe }]
+      : [];
+  });
+  const coveredWeight = covered.reduce((sum, item) => sum + item.holding.weight, 0);
+  const earningsYield = covered.reduce(
+    (sum, item) => sum + item.holding.weight / item.pe,
+    0,
+  );
+  const value = coveredWeight > 0 && earningsYield > 0
+    ? coveredWeight / earningsYield
+    : null;
+  return {
+    value: value !== null && Number.isFinite(value) ? value : null,
+    coverageWeight: totalWeight > 0 ? (coveredWeight / totalWeight) * 100 : 0,
+    coveredHoldings: covered.length,
+    totalHoldings: eligible.length,
+  };
+}
+
+export function aggregateConsensusWindow(
+  holdings: Holding[],
+  metricsBySecurity: ReadonlyMap<string, SecurityMetricValues>,
+  quarters: 1 | 2 | 4,
+): ConsensusWindowView {
+  const eligible = holdings.filter((holding) =>
+    holding.weight > 0 && holding.assetClass.toLowerCase().includes("equity"));
+  const totalWeight = eligible.reduce((sum, holding) => sum + holding.weight, 0);
+  const derivedBySecurity = new Map(eligible.flatMap((holding) => {
+    const series = metricsBySecurity.get(holding.securityId)?.estimateSeries;
+    const derived = series ? deriveConsensusWindow(series, quarters) : null;
+    return derived ? [[holding.securityId, derived] as const] : [];
+  }));
+  const valuationPath = Array.from({ length: quarters + 1 }, (_, index) =>
+    aggregateHarmonicPe(
+      eligible,
+      totalWeight,
+      new Map([...derivedBySecurity].map(([securityId, derived]) =>
+        [securityId, derived.pePath[index]])),
+    ));
+  const coveredForGrowth = eligible.flatMap((holding) => {
+    const derived = derivedBySecurity.get(holding.securityId);
+    const historicalPe = derived?.pePath[0];
+    const forwardPe = derived?.pePath[derived.pePath.length - 1];
+    return typeof historicalPe === "number" && historicalPe > 0 &&
+      typeof forwardPe === "number" && forwardPe > 0
+      ? [{ holding, historicalPe, forwardPe }]
+      : [];
+  });
+  const coveredWeight = coveredForGrowth.reduce((sum, item) => sum + item.holding.weight, 0);
+  const historicalEarningsYield = coveredForGrowth.reduce(
+    (sum, item) => sum + item.holding.weight / item.historicalPe,
+    0,
+  );
+  const forwardEarningsYield = coveredForGrowth.reduce(
+    (sum, item) => sum + item.holding.weight / item.forwardPe,
+    0,
+  );
+  const growthValue = historicalEarningsYield > 0 && forwardEarningsYield >= 0
+    ? (forwardEarningsYield / historicalEarningsYield - 1) * 100
+    : null;
+
+  return {
+    quarters,
+    annualizationFactor: (4 / quarters) as 1 | 2 | 4,
+    valuationPath,
+    growth: {
+      value: growthValue !== null && Number.isFinite(growthValue) ? growthValue : null,
+      coverageWeight: totalWeight > 0 ? (coveredWeight / totalWeight) * 100 : 0,
+      coveredHoldings: coveredForGrowth.length,
+      totalHoldings: eligible.length,
+    },
+  };
+}
 
 function aggregateEarningsYieldGrowth(
   eligible: Holding[],

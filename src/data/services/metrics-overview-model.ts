@@ -1,10 +1,16 @@
 import type { Holding, HoldingsSnapshot } from "@/domain/etf";
 import type {
+  ConsensusHorizon,
   ComponentValuationView,
   EtfMetricsOverview,
   SecurityMetricValues,
 } from "@/domain/metrics";
-import { aggregateEtfMetrics } from "@/domain/processors/aggregate-etf-metrics";
+import { CONSENSUS_HORIZONS } from "@/domain/metrics";
+import {
+  aggregateConsensusWindow,
+  aggregateEtfMetrics,
+} from "@/domain/processors/aggregate-etf-metrics";
+import { consensusQuarters } from "@/domain/processors/derive-estimate-metrics";
 
 const COMPONENT_POINT_LIMIT = 500;
 
@@ -116,6 +122,10 @@ export function buildEtfMetricsOverview(
   const totalWeight = eligible.reduce((sum, holding) => sum + holding.weight, 0);
   const mapped = eligible.filter((holding) => resolvedSecurityIds.has(holding.securityId));
   const mappedWeight = mapped.reduce((sum, holding) => sum + holding.weight, 0);
+  const consensusWindows = Object.fromEntries(CONSENSUS_HORIZONS.map((horizon) => [
+    horizon,
+    aggregateConsensusWindow(snapshot.holdings, metricsBySecurity, consensusQuarters(horizon)),
+  ])) as Record<ConsensusHorizon, EtfMetricsOverview["consensusWindows"][ConsensusHorizon]>;
   return {
     etfId: snapshot.etf.id,
     ticker: snapshot.etf.ticker,
@@ -125,6 +135,7 @@ export function buildEtfMetricsOverview(
     mappedHoldings: mapped.length,
     mappingCoverageWeight: totalWeight > 0 ? (mappedWeight / totalWeight) * 100 : 0,
     metrics: aggregateEtfMetrics(snapshot.holdings, metricsBySecurity),
+    consensusWindows,
     componentValuation: buildComponentValuation(snapshot.holdings, metricsBySecurity),
   };
 }

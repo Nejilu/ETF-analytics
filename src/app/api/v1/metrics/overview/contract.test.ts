@@ -26,6 +26,39 @@ const result: MetricsOverviewResult = {
       coveredHoldings: 1,
       totalHoldings: 2,
     }],
+    consensusWindows: {
+      "4q": {
+        quarters: 4,
+        annualizationFactor: 1,
+        valuationPath: Array.from({ length: 5 }, (_, index) => ({
+          value: 20 - index,
+          coverageWeight: 80,
+          coveredHoldings: 1,
+          totalHoldings: 2,
+        })),
+        growth: { value: 25, coverageWeight: 80, coveredHoldings: 1, totalHoldings: 2 },
+      },
+      "2q": {
+        quarters: 2,
+        annualizationFactor: 2,
+        valuationPath: Array.from({ length: 3 }, (_, index) => ({
+          value: 19 - index,
+          coverageWeight: 80,
+          coveredHoldings: 1,
+          totalHoldings: 2,
+        })),
+        growth: { value: 20, coverageWeight: 80, coveredHoldings: 1, totalHoldings: 2 },
+      },
+      "1q": {
+        quarters: 1,
+        annualizationFactor: 4,
+        valuationPath: [
+          { value: 18, coverageWeight: 80, coveredHoldings: 1, totalHoldings: 2 },
+          { value: 15, coverageWeight: 80, coveredHoldings: 1, totalHoldings: 2 },
+        ],
+        growth: { value: 15, coverageWeight: 80, coveredHoldings: 1, totalHoldings: 2 },
+      },
+    },
     componentValuation: {
       points: [{
         securityId: "security:compat",
@@ -83,6 +116,8 @@ test("serializes the complete published v1 metrics contract into the HTTP respon
   assert.equal(point.forwardEstimateSum, 6.25);
   assert.equal(point.estimatePoints.length, 8);
   assert.equal(point.estimatePoints.filter((item) => item.isHistorical).length, 4);
+  assert.equal(payload.data.etfs[0].consensusWindows["2q"].annualizationFactor, 2);
+  assert.equal(payload.data.etfs[0].consensusWindows["1q"].valuationPath.length, 2);
 });
 
 test("invalidates the HTTP ETag for any serialized contract change", async () => {

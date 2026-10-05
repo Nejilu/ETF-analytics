@@ -2391,6 +2391,28 @@ tbody tr:hover {
   width: 150px;
 }
 
+.holdings-table-search {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 20px 14px;
+}
+
+.holdings-table-search .result-search input {
+  width: 100%;
+}
+
+.holdings-table-search-count {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+td.holdings-table-empty {
+  color: var(--muted);
+  padding: 24px 20px;
+  text-align: center;
+}
+
 .synthetic-ranking {
   margin-top: 15px;
 }

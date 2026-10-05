@@ -66,6 +66,49 @@ type GeographyGrouping = "country" | "continent";
 
 const INITIAL_VISIBLE_POSITIONS = 50;
 
+function matchesHoldingSearch(
+  position: { ticker: string; name: string; securityId: string },
+  query: string,
+) {
+  const normalize = (value: string) =>
+    value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleUpperCase("en-US");
+  const search = normalize(query.trim());
+  return !search || [position.ticker, position.name, position.securityId]
+    .some((value) => normalize(value).includes(search));
+}
+
+function HoldingsTableSearch({
+  query,
+  onChange,
+  controls,
+  count,
+  total,
+}: {
+  query: string;
+  onChange: (query: string) => void;
+  controls: string;
+  count: number;
+  total: number;
+}) {
+  return (
+    <div className="holdings-table-search">
+      <label className="result-search">
+        <span className="sr-only">Filter holdings by name, ticker or identifier</span>
+        <input
+          type="search"
+          value={query}
+          placeholder="Filter holdings by name or ticker"
+          aria-controls={controls}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </label>
+      <span className="holdings-table-search-count" role="status">
+        {query.trim() ? `${count} of ${total} holdings match` : `${total} holdings`}
+      </span>
+    </div>
+  );
+}
+
 const COLORS = {
   left: "var(--left)",
   overlap: "var(--overlap)",
@@ -556,6 +599,7 @@ function ImplicitSleevesPanel({
 }
 
 function PositionTable({ comparison }: { comparison: ComparisonResult }) {
+  const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"active" | "overlap">("active");
   const [activeRankSide, setActiveRankSide] =
     useState<SelectionSide>("left");
@@ -584,10 +628,11 @@ function PositionTable({ comparison }: { comparison: ComparisonResult }) {
           : b.overlapWeight - a.overlapWeight,
       );
   }, [activeWeightField, comparison, filter]);
+  const matchingRows = rows.filter((position) => matchesHoldingSearch(position, query));
   const visibleRows = isExpanded
-    ? rows
-    : rows.slice(0, INITIAL_VISIBLE_POSITIONS);
-  const hasAdditionalRows = rows.length > INITIAL_VISIBLE_POSITIONS;
+    ? matchingRows
+    : matchingRows.slice(0, INITIAL_VISIBLE_POSITIONS);
+  const hasAdditionalRows = matchingRows.length > INITIAL_VISIBLE_POSITIONS;
 
   return (
     <section className="panel positions-panel">
@@ -650,6 +695,13 @@ function PositionTable({ comparison }: { comparison: ComparisonResult }) {
           </div>
         </div>
       </div>
+      <HoldingsTableSearch
+        query={query}
+        onChange={setQuery}
+        controls="security-level-positions"
+        count={matchingRows.length}
+        total={rows.length}
+      />
       <div className="table-scroll">
         <table>
           <thead>
@@ -662,6 +714,9 @@ function PositionTable({ comparison }: { comparison: ComparisonResult }) {
             </tr>
           </thead>
           <tbody id="security-level-positions">
+            {matchingRows.length === 0 ? (
+              <tr><td colSpan={5} className="holdings-table-empty">No holdings match your search.</td></tr>
+            ) : null}
             {visibleRows.map((position) => (
               <PositionRow
                 key={position.securityId}
@@ -684,12 +739,12 @@ function PositionTable({ comparison }: { comparison: ComparisonResult }) {
           <span>
             {isExpanded
               ? `Show first ${INITIAL_VISIBLE_POSITIONS} positions`
-              : `Show all ${rows.length} positions`}
+              : `Show all ${matchingRows.length} positions`}
           </span>
           <small>
             {isExpanded
-              ? `${rows.length} positions displayed`
-              : `${INITIAL_VISIBLE_POSITIONS} of ${rows.length} displayed`}
+              ? `${matchingRows.length} positions displayed`
+              : `${INITIAL_VISIBLE_POSITIONS} of ${matchingRows.length} displayed`}
           </small>
           <b aria-hidden="true">{isExpanded ? "↑" : "↓"}</b>
         </button>
@@ -967,6 +1022,7 @@ function DistortionPositionsTable({
 }: {
   analysis: HoldingsAnalysisResult;
 }) {
+  const [query, setQuery] = useState("");
   const [ranking, setRanking] = useState<"distortion" | "weight">("distortion");
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const viewKey = `${analysis.calculatedAt}:${ranking}`;
@@ -981,10 +1037,11 @@ function DistortionPositionsTable({
     [analysis.positions, ranking],
   );
   const isExpanded = expandedKey === viewKey;
+  const matchingRows = rows.filter((position) => matchesHoldingSearch(position, query));
   const visibleRows = isExpanded
-    ? rows
-    : rows.slice(0, INITIAL_VISIBLE_POSITIONS);
-  const hasAdditionalRows = rows.length > INITIAL_VISIBLE_POSITIONS;
+    ? matchingRows
+    : matchingRows.slice(0, INITIAL_VISIBLE_POSITIONS);
+  const hasAdditionalRows = matchingRows.length > INITIAL_VISIBLE_POSITIONS;
 
   return (
     <section className="panel holdings-position-table">
@@ -1012,6 +1069,13 @@ function DistortionPositionsTable({
           </button>
         </div>
       </div>
+      <HoldingsTableSearch
+        query={query}
+        onChange={setQuery}
+        controls="holdings-analysis-positions"
+        count={matchingRows.length}
+        total={rows.length}
+      />
       <div className="table-scroll">
         <table>
           <thead>
@@ -1025,6 +1089,9 @@ function DistortionPositionsTable({
             </tr>
           </thead>
           <tbody id="holdings-analysis-positions">
+            {matchingRows.length === 0 ? (
+              <tr><td colSpan={6} className="holdings-table-empty">No holdings match your search.</td></tr>
+            ) : null}
             {visibleRows.map((position) => (
               <tr key={position.securityId}>
                 <td>
@@ -1071,12 +1138,12 @@ function DistortionPositionsTable({
           <span>
             {isExpanded
               ? `Show first ${INITIAL_VISIBLE_POSITIONS} holdings`
-              : `Show all ${rows.length} holdings`}
+              : `Show all ${matchingRows.length} holdings`}
           </span>
           <small>
             {isExpanded
-              ? `${rows.length} holdings displayed`
-              : `${INITIAL_VISIBLE_POSITIONS} of ${rows.length} displayed`}
+              ? `${matchingRows.length} holdings displayed`
+              : `${INITIAL_VISIBLE_POSITIONS} of ${matchingRows.length} displayed`}
           </small>
           <b aria-hidden="true">{isExpanded ? "↑" : "↓"}</b>
         </button>
@@ -1146,6 +1213,7 @@ function HoldingsOverviewTable({
   analysis: HoldingsAnalysisResult;
   weightView: HoldingsWeightView;
 }) {
+  const [query, setQuery] = useState("");
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const viewKey = `${analysis.calculatedAt}:${weightView}:${analysis.positions.map((position) => position.securityId).join(",")}`;
   const rows = useMemo(
@@ -1162,10 +1230,11 @@ function HoldingsOverviewTable({
     [analysis.positions, weightView],
   );
   const isExpanded = expandedKey === viewKey;
+  const matchingRows = rows.filter((position) => matchesHoldingSearch(position, query));
   const visibleRows = isExpanded
-    ? rows
-    : rows.filter((position, index) => index < INITIAL_VISIBLE_POSITIONS || position.isCash);
-  const hasAdditionalRows = rows.some(
+    ? matchingRows
+    : matchingRows.filter((position, index) => index < INITIAL_VISIBLE_POSITIONS || position.isCash);
+  const hasAdditionalRows = matchingRows.some(
     (position, index) => index >= INITIAL_VISIBLE_POSITIONS && !position.isCash,
   );
 
@@ -1180,6 +1249,13 @@ function HoldingsOverviewTable({
           {weightView === "with-cash" ? "Portfolio normalized with cash" : "Securities normalized to 100%"}
         </span>
       </div>
+      <HoldingsTableSearch
+        query={query}
+        onChange={setQuery}
+        controls="holdings-overview-positions"
+        count={matchingRows.length}
+        total={rows.length}
+      />
       <div className="table-scroll">
         <table>
           <thead>
@@ -1192,6 +1268,9 @@ function HoldingsOverviewTable({
             </tr>
           </thead>
           <tbody id="holdings-overview-positions">
+            {matchingRows.length === 0 ? (
+              <tr><td colSpan={5} className="holdings-table-empty">No holdings match your search.</td></tr>
+            ) : null}
             {visibleRows.map((position) => (
               <tr
                 key={position.securityId}
@@ -1228,12 +1307,12 @@ function HoldingsOverviewTable({
           <span>
             {isExpanded
               ? `Show first ${INITIAL_VISIBLE_POSITIONS} holdings`
-              : `Show all ${rows.length} holdings`}
+              : `Show all ${matchingRows.length} holdings`}
           </span>
           <small>
             {isExpanded
-              ? `${rows.length} holdings displayed`
-              : `${visibleRows.length} of ${rows.length} displayed`}
+              ? `${matchingRows.length} holdings displayed`
+              : `${visibleRows.length} of ${matchingRows.length} displayed`}
           </small>
           <b aria-hidden="true">{isExpanded ? "↑" : "↓"}</b>
         </button>

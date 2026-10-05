@@ -16,6 +16,12 @@ services:
       - 127.0.0.1:3000:3000
     volumes:
       - /home/julie/weightings-analytics/data:/data
+      - type: bind
+        source: /srv/agents/codex/home/.codex-weightings-analysis/t3-backend-token
+        target: /run/secrets/t3-weightings-token
+        read_only: true
+        bind:
+          create_host_path: false
     networks:
       dokploy-network:
         aliases:

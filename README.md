@@ -21,6 +21,10 @@ and creating reusable ETFs from iShares source universes.
 - Enrich constituents with TradingView fundamentals and consensus EPS series.
 - Aggregate valuation, earnings, quality, size, income, and risk metrics with
   explicit data coverage and source freshness.
+- Research ETFs and portfolios with Codex through T3: templates, model and
+  reasoning selection, dated web sources, follow-ups and saved conversations.
+  See [AI analysis setup](docs/ai-analysis.md) for the optional backend connection
+  and the local versus administrator-only server access rules.
 
 ## Quick start
 

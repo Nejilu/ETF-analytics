@@ -48,6 +48,10 @@ import { GET as analysisGET } from "@/app/api/v1/holdings/[ticker]/analysis/rout
 import { GET as compareGET } from "@/app/api/v1/compare/route";
 import { GET as metricsGET } from "@/app/api/v1/metrics/overview/route";
 import { GET as quoteGET } from "@/app/api/v1/prices/quote/route";
+import { GET as aiConfigGET } from "@/app/api/v1/ai/config/route";
+import { GET as aiRunsGET, POST as aiRunsPOST } from "@/app/api/v1/ai/runs/route";
+import { GET as aiRunGET, DELETE as aiInterrupt } from "@/app/api/v1/ai/runs/[id]/route";
+import { GET as aiEventsGET } from "@/app/api/v1/ai/runs/[id]/events/route";
 
 const originalEnv = { ...process.env };
 const directory = mkdtempSync(join(tmpdir(), "weightings-site-"));
@@ -636,6 +640,27 @@ test("owner creates and edits a portfolio through the API and publication change
   assert.equal(detail.totalMarketValueUsd, 1592.34);
 });
 
+test("AI endpoints reject visitors and unsigned owner requests before T3 or database access", async () => {
+  const id = "00000000-0000-4000-8000-000000000000";
+  for (const host of ["public.example.com", "owner.example.com"]) {
+    const context = { params: Promise.resolve({ id }) };
+    const responses = await Promise.all([
+      aiConfigGET(request("/api/v1/ai/config", "GET", undefined, host)),
+      aiRunsGET(request("/api/v1/ai/runs", "GET", undefined, host)),
+      aiRunsPOST(request("/api/v1/ai/runs", "POST", {}, host)),
+      aiRunGET(request(`/api/v1/ai/runs/${id}`, "GET", undefined, host), context),
+      aiInterrupt(request(`/api/v1/ai/runs/${id}`, "DELETE", undefined, host), context),
+      aiEventsGET(request(`/api/v1/ai/runs/${id}/events`, "GET", undefined, host), context),
+    ]);
+    for (const response of responses) assert.equal(response.status, 403);
+  }
+  process.env.SITE_ACCESS_MODE = "local";
+  try {
+    const badOrigin = new Request("http://localhost:3000/api/v1/ai/runs", { method: "POST", headers: { host: "localhost:3000", origin: "https://attacker.example" }, body: "{}" });
+    assert.equal((await aiRunsPOST(badOrigin)).status, 403);
+  } finally { process.env.SITE_ACCESS_MODE = "cloudflare"; }
+});
+
 test("every v1 route is wrapped by the site access boundary", () => {
   function inspect(directory: string) {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -643,7 +668,7 @@ test("every v1 route is wrapped by the site access boundary", () => {
       if (entry.isDirectory()) inspect(path);
       else if (entry.name === "route.ts") {
         const source = readFileSync(path, "utf8");
-        assert(source.includes("withSiteAccess"), path);
+        assert(source.includes("withSiteAccess") || (path.includes(`${join("api", "v1", "ai")}`) && source.includes("withAiAccess")), path);
         assert(
           !/export (?:async )?function (?:GET|POST|PUT|PATCH|DELETE)/.test(
             source,

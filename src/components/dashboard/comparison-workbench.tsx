@@ -50,6 +50,8 @@ const MetricsOverview = dynamic(
   },
 );
 
+const AiAnalysisPanel = dynamic(() => import("./ai-analysis-panel").then((module) => module.AiAnalysisPanel), { ssr: false });
+
 interface ComparisonWorkbenchProps {
   owner: boolean;
   ownerOrigin: string;
@@ -1295,7 +1297,7 @@ export function ComparisonWorkbench({
   const revision = useRef(catalogRevision);
   const [resultRevision, setResultRevision] = useState(catalogRevision);
   const [workspaceView, setWorkspaceView] = useState<
-    "compare" | "portfolio" | "creator" | "metrics"
+    "compare" | "portfolio" | "creator" | "metrics" | "ai"
   >("compare");
   const [leftEtfId, setLeftEtfId] = useState("ivv-us");
   const [rightEtfId, setRightEtfId] = useState("acwi-us");
@@ -1594,6 +1596,7 @@ export function ComparisonWorkbench({
             <span className="nav-icon">⌗</span>
             Metrics
           </button>
+          {owner ? <button className={`nav-item${workspaceView === "ai" ? " nav-item--active" : ""}`} type="button" aria-pressed={workspaceView === "ai"} onClick={() => setWorkspaceView("ai")}><span className="nav-icon">✦</span>AI analysis</button> : null}
         </nav>
         <div className="sidebar-card">
           <span className="live-pulse" />
@@ -1622,12 +1625,12 @@ export function ComparisonWorkbench({
                 ? "Portfolio analytics"
                 : workspaceView === "creator"
                   ? "ETF Creator"
-                  : "Metrics overview"}
+                  : workspaceView === "ai" ? "AI analysis" : "Metrics overview"}
           </div>
           <div className="topbar-actions">
             <span
               className={`source-badge ${
-                workspaceView === "portfolio" || workspaceView === "creator"
+                workspaceView === "portfolio" || workspaceView === "creator" || workspaceView === "ai"
                   ? ""
                   : workspaceView === "metrics"
                     ? ""
@@ -1639,7 +1642,7 @@ export function ComparisonWorkbench({
               }`}
             >
               <i />
-              {workspaceView === "portfolio"
+              {workspaceView === "ai" ? "Codex research" : workspaceView === "portfolio"
                 ? "Local portfolio"
                 : workspaceView === "creator"
                   ? "Selected ETF universe"
@@ -1687,6 +1690,7 @@ export function ComparisonWorkbench({
             >
               Metrics
             </button>
+            {owner ? <button type="button" className={workspaceView === "ai" ? "is-active" : ""} onClick={() => setWorkspaceView("ai")}>AI analysis</button> : null}
           </div>
           {workspaceView === "compare" ? (
             <div className="holdings-overview">
@@ -2135,13 +2139,15 @@ export function ComparisonWorkbench({
               catalog={researchCatalog}
               onCatalogChanged={refreshCatalog}
             />
-          ) : (
+          ) : workspaceView === "metrics" ? (
             <MetricsOverview
               key={resultRevision}
               catalog={researchCatalog}
               initialEtfIds={[leftEtfId, rightEtfId]}
             />
-          )}
+          ) : null}
+
+          {owner && workspaceView === "ai" ? <AiAnalysisPanel catalog={availableCatalog} initialEtfId={leftEtfId} /> : null}
 
           {workspaceView === "compare" && leftEtf?.fundType === "portfolio" && leftEtf.visibility === "public" && leftEtf.publiclyAvailable && <PublishedPortfolioPanel key={`${leftEtf.id}-${resultRevision}`} etfId={leftEtf.id} />}
           {workspaceView === "compare" && comparisonMode && rightEtf?.id !== leftEtf?.id && rightEtf?.fundType === "portfolio" && rightEtf.visibility === "public" && rightEtf.publiclyAvailable && <PublishedPortfolioPanel key={`${rightEtf.id}-${resultRevision}`} etfId={rightEtf.id} />}

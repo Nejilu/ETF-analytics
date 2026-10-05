@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  check,
   index,
   integer,
   primaryKey,
@@ -8,6 +9,17 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+
+export const aiAnalysisRuns = sqliteTable("ai_analysis_runs", {
+  id: text("id").primaryKey(),
+  environmentId: text("environment_id").notNull(),
+  threadId: text("thread_id").notNull(),
+  title: text("title").notNull(),
+  requestJson: text("request_json").notNull(),
+  pendingMessageId: text("pending_message_id"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [check("ai_analysis_runs_request_json_valid", sql`json_valid(${table.requestJson})`)]);
 
 export const benchmarks = sqliteTable(
   "benchmarks",

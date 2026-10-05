@@ -47,8 +47,11 @@ const MetricsOverview = dynamic(
   },
 );
 
+const AiAnalysisPanel = dynamic(() => import("./ai-analysis-panel").then((module) => module.AiAnalysisPanel), { ssr: false });
+
 interface ComparisonWorkbenchProps {
   catalog: CatalogGroup[];
+  aiAnalysisEnabled?: boolean;
 }
 
 type SelectionSide = "left" | "right";
@@ -1283,10 +1286,11 @@ function DataUnavailableState({
 
 export function ComparisonWorkbench({
   catalog,
+  aiAnalysisEnabled = true,
 }: ComparisonWorkbenchProps) {
   const [availableCatalog, setAvailableCatalog] = useState(catalog);
   const [workspaceView, setWorkspaceView] = useState<
-    "compare" | "portfolio" | "creator" | "metrics"
+    "compare" | "portfolio" | "creator" | "metrics" | "ai"
   >("compare");
   const [leftEtfId, setLeftEtfId] = useState("ivv-us");
   const [rightEtfId, setRightEtfId] = useState("acwi-us");
@@ -1546,6 +1550,7 @@ export function ComparisonWorkbench({
             <span className="nav-icon">⌗</span>
             Metrics
           </button>
+          {aiAnalysisEnabled ? <button className={`nav-item${workspaceView === "ai" ? " nav-item--active" : ""}`} type="button" aria-pressed={workspaceView === "ai"} onClick={() => setWorkspaceView("ai")}><span className="nav-icon">✦</span>AI analysis</button> : null}
         </nav>
         <div className="sidebar-card">
           <span className="live-pulse" />
@@ -1571,12 +1576,12 @@ export function ComparisonWorkbench({
                 ? "Portfolio analytics"
                 : workspaceView === "creator"
                   ? "ETF Creator"
-                  : "Metrics overview"}
+                  : workspaceView === "ai" ? "AI analysis" : "Metrics overview"}
           </div>
           <div className="topbar-actions">
             <span
               className={`source-badge ${
-                workspaceView === "portfolio" || workspaceView === "creator"
+                workspaceView === "portfolio" || workspaceView === "creator" || workspaceView === "ai"
                   ? ""
                   : workspaceView === "metrics"
                     ? ""
@@ -1588,7 +1593,7 @@ export function ComparisonWorkbench({
               }`}
             >
               <i />
-              {workspaceView === "portfolio"
+              {workspaceView === "ai" ? "Codex research" : workspaceView === "portfolio"
                 ? "Local portfolio"
                 : workspaceView === "creator"
                   ? "Selected ETF universe"
@@ -1636,6 +1641,7 @@ export function ComparisonWorkbench({
             >
               Metrics
             </button>
+            {aiAnalysisEnabled ? <button type="button" className={workspaceView === "ai" ? "is-active" : ""} onClick={() => setWorkspaceView("ai")}>AI analysis</button> : null}
           </div>
           {workspaceView === "compare" ? (
             <div className="holdings-overview">
@@ -2084,12 +2090,14 @@ export function ComparisonWorkbench({
               catalog={researchCatalog}
               onCatalogChanged={refreshCatalog}
             />
-          ) : (
+          ) : workspaceView === "metrics" ? (
             <MetricsOverview
               catalog={researchCatalog}
               initialEtfIds={[leftEtfId, rightEtfId]}
             />
-          )}
+          ) : null}
+
+          {aiAnalysisEnabled && workspaceView === "ai" ? <AiAnalysisPanel catalog={availableCatalog} initialEtfId={leftEtfId} /> : null}
 
           <footer className="disclaimer">
             <span>Weightings Analytics</span>

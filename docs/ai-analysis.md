@@ -30,6 +30,10 @@ Run the script **on the T3 host as the T3 OS user**, with the correct
 node scripts/connect-ai-t3.mjs
 ```
 
+`--ensure` reconciles the dedicated instance and project without issuing a new
+backend credential. `--check` reports configuration drift without changing the
+instance or project. Both preserve settings for other T3 projects and instances.
+
 The script creates a dedicated Codex home and an empty research workspace. Its
 `auth.json` is a symbolic link to the existing account's auth file; credentials
 are not copied or printed. This preserves the original provider configuration

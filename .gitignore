@@ -14,6 +14,27 @@
 .env*
 !.env.example
 
+# local development and assistant files
+AGENTS.md
+CLAUDE.md
+/.claude/
+/.cursor/
+/.vscode/
+/.idea/
+/docs/local/
+/docs/audit-*.md
+/docs/notes-*.md
+/reports/
+/screenshots/
+/playwright-report/
+/test-results/
+/coverage/
+/logs/
+/tmp/
+*.log
+*.tmp
+*.bak
+
 # misc
 /.codex/
 .DS_Store

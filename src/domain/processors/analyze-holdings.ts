@@ -21,6 +21,10 @@ function isEquity(holding: Holding): boolean {
 }
 
 function normalizedHoldings(snapshot: HoldingsSnapshot): Holding[] {
+  // Portfolio weights already use NAV, including shorts, cash and leverage.
+  if (snapshot.etf.fundType === "portfolio") {
+    return mergeEquivalentHoldings(snapshot.holdings);
+  }
   return mergeEquivalentHoldings(
     normalizeHoldingWeights(
       snapshot.holdings,
@@ -153,6 +157,9 @@ export function analyzeHoldings(
 
   return {
     etf: targetSnapshot.etf,
+    ...(targetSnapshot.etf.fundType === "portfolio" && targetSnapshot.portfolioValuation
+      ? { portfolioValuation: targetSnapshot.portfolioValuation }
+      : {}),
     asOf: targetSnapshot.asOf,
     sourceStatus: targetSnapshot.sourceStatus,
     sourceIssues: holdingsSourceIssues([targetSnapshot, acwiSnapshot]),

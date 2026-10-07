@@ -73,6 +73,13 @@ exposures. Display IDs such as `economic:*` must never replace canonical IDs in
 provider mappings, prices, persisted holdings, or constituent metrics. Grouped
 rows retain a canonical quote candidate and its listing ticker.
 
+Classic Holdings analysis includes a read-only portfolio valuation: total NAV
+in USD, actual instruments with amounts and share quantities, and explicit cash
+balances. Underlying dollar exposures use the original signed NAV weights,
+even when the display normalizes securities without cash. Portfolio snapshots
+already use NAV weights and must not be normalized as physical fund snapshots.
+Portfolio holdings and analysis responses use `private, no-store`.
+
 Custom ETFs retain selected security identities and a source universe. Their
 weights are recalculated from the latest source composition; they are not frozen
 copies of creation-day weights. Missing selected constituents are reported in

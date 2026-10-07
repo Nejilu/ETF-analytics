@@ -47,6 +47,7 @@ export interface HoldingsDistortionAnalysis {
 }
 
 export interface HoldingsAnalysisResult {
+  portfolioValuation?: import("./portfolio-valuation").PortfolioHoldingsValuation;
   etf: EtfShareClass;
   asOf: string;
   sourceStatus: DataStatus;

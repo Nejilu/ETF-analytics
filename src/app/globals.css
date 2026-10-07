@@ -3176,6 +3176,36 @@ td.holdings-table-empty {
   margin-top: 0;
 }
 
+.portfolio-valuation-panel summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0 20px;
+  padding: 12px 0;
+}
+
+.portfolio-valuation-panel details > p {
+  margin-left: 20px;
+  margin-right: 20px;
+}
+
+.holdings-position-table.portfolio-valuation-panel table {
+  min-width: 540px;
+}
+
+.portfolio-valuation-panel td:not(:first-child) {
+  white-space: nowrap;
+}
+
+.portfolio-valuation-panel summary:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.holdings-top-list.holdings-top-list--valued > div {
+  grid-template-columns: minmax(90px, 1fr) minmax(50px, 1fr) minmax(95px, auto);
+}
+
 .holdings-distortion-panel,
 .holdings-geography-panel,
 .holdings-sector-panel,
@@ -5338,6 +5368,13 @@ td.holdings-table-empty {
 .ai-controls label { display: grid; gap: 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .ai-controls select, .ai-controls textarea { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; }
 .ai-controls textarea { resize: vertical; }
+.ai-position-budget { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
+.ai-position-budget label > span, .ai-range-labels { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.ai-position-budget output { color: var(--ink); font-size: 16px; font-variant-numeric: tabular-nums; }
+.ai-position-budget input[type="range"] { width: 100%; margin: 4px 0; accent-color: var(--left); cursor: pointer; }
+.ai-position-budget input[type="range"]:disabled { cursor: default; }
+.ai-position-budget p { margin: 0; }
+.ai-range-labels { color: var(--muted); font-size: 11px; }
 .ai-control-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .ai-templates { display: grid; gap: 8px; border: 0; padding: 0; margin: 0; min-width: 0; }
 .ai-templates legend { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 10px; }

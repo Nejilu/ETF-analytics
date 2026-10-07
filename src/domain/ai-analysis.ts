@@ -8,6 +8,13 @@ export const AI_TEMPLATES = [
 ] as const;
 
 export type AiTemplateId = (typeof AI_TEMPLATES)[number]["id"];
+export const AI_MAX_POSITIONS = 200;
+export const AI_POSITION_DEFAULTS: Record<AiTemplateId, number> = {
+  custom: 20, overview: 20, positions: 30, diversification: 10, coherence: 20, news: 10,
+};
+export function aiPositionLimit(request: Pick<AiAnalysisRequest, "template" | "positionLimit">) {
+  return request.positionLimit ?? AI_POSITION_DEFAULTS[request.template];
+}
 export interface AiModel {
   id: string;
   name: string;
@@ -30,12 +37,15 @@ export interface AiAnalysisRequest {
   language: "fr" | "en";
   question: string;
   runId?: string;
+  refreshSnapshot?: boolean;
+  positionLimit?: number;
 }
 export interface AiRun {
   id: string;
   title: string;
   createdAt: string;
   request: AiAnalysisRequest;
+  snapshotSentAt: string | null;
 }
 export interface AiMessage { id: string; role: "user" | "assistant"; text: string }
 export interface AiSnapshot {
@@ -64,7 +74,9 @@ export function parseAiRequest(value: unknown): AiAnalysisRequest {
   if (v.language !== "fr" && v.language !== "en") throw new AiError(400, "Invalid response language.");
   if (typeof v.question !== "string" || v.question.length > 4000) throw new AiError(400, "The question must be at most 4,000 characters.");
   if (v.runId !== undefined && (typeof v.runId !== "string" || !isAiRunId(v.runId))) throw new AiError(400, "Invalid analysis identifier.");
+  if (v.refreshSnapshot !== undefined && typeof v.refreshSnapshot !== "boolean") throw new AiError(400, "Invalid holdings refresh option.");
+  if (v.positionLimit !== undefined && (typeof v.positionLimit !== "number" || !Number.isInteger(v.positionLimit) || v.positionLimit < 0 || v.positionLimit > AI_MAX_POSITIONS)) throw new AiError(400, `Choose between 0 and ${AI_MAX_POSITIONS} positions.`);
   if (v.runId && !v.question.trim()) throw new AiError(400, "Enter a follow-up question.");
   if (v.template === "custom" && !v.question.trim()) throw new AiError(400, "Enter your custom analysis question.");
-  return { target: target.kind === "portfolio" ? { kind: "portfolio" } : { kind: "etf", reference: target.reference as string }, template: v.template as AiTemplateId, model: v.model, effort: v.effort, language: v.language, question: v.question.trim(), ...(v.runId ? { runId: v.runId as string } : {}) };
+  return { target: target.kind === "portfolio" ? { kind: "portfolio" } : { kind: "etf", reference: target.reference as string }, template: v.template as AiTemplateId, positionLimit: typeof v.positionLimit === "number" ? v.positionLimit : AI_POSITION_DEFAULTS[v.template as AiTemplateId], model: v.model, effort: v.effort, language: v.language, question: v.question.trim(), ...(v.runId ? { runId: v.runId as string } : {}), ...(v.refreshSnapshot === true ? { refreshSnapshot: true } : {}) };
 }

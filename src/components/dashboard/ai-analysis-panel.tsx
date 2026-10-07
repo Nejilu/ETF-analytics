@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { AI_TEMPLATES, type AiConfiguration, type AiRun, type AiSnapshot, type AiTemplateId } from "@/domain/ai-analysis";
+import { AI_TEMPLATES, AI_MAX_POSITIONS, AI_POSITION_DEFAULTS, aiPositionLimit, type AiConfiguration, type AiRun, type AiSnapshot, type AiTemplateId } from "@/domain/ai-analysis";
 import type { CatalogGroup } from "@/domain/etf";
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -17,6 +17,7 @@ export function AiAnalysisPanel({ catalog, initialEtfId }: { catalog: CatalogGro
   const [configuration, setConfiguration] = useState<AiConfiguration | null>(null);
   const [target, setTarget] = useState(initialEtfId);
   const [template, setTemplate] = useState<AiTemplateId>("overview");
+  const [positionLimit, setPositionLimit] = useState(AI_POSITION_DEFAULTS.overview);
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
   const [language, setLanguage] = useState<"fr" | "en">("fr");
@@ -84,17 +85,18 @@ export function AiAnalysisPanel({ catalog, initialEtfId }: { catalog: CatalogGro
     setRun(value); setSnapshot(null); setError(""); setQuestion("");
     setTarget(value.request.target.kind === "portfolio" ? "portfolio" : value.request.target.reference);
     setTemplate(value.request.template); setLanguage(value.request.language);
+    setPositionLimit(aiPositionLimit(value.request));
     const available = configuration?.models.find((m) => m.id === value.request.model);
     if (available) { setModel(available.id); setEffort(available.efforts.some((e) => e.id === value.request.effort) ? value.request.effort : available.defaultEffort); }
   }
 
-  async function start() {
+  async function start(refreshSnapshot = false) {
     if (requestLock.current || locked || !selectedModel || (questionRequired && !question.trim())) return;
     requestLock.current = true; setBusy(true); setError("");
     try {
       const value = await api<AiRun>("/api/v1/ai/runs", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-          target: target === "portfolio" ? { kind: "portfolio" } : { kind: "etf", reference: target }, template, model, effort, language, question, ...(run ? { runId: run.id } : {}),
+          target: target === "portfolio" ? { kind: "portfolio" } : { kind: "etf", reference: target }, template, positionLimit, model, effort, language, question, ...(run ? { runId: run.id, refreshSnapshot } : {}),
         }),
       });
       setRun(value); setSnapshot({ run: value, messages: snapshot?.messages ?? [], state: "starting", activities: [] });
@@ -131,9 +133,18 @@ export function AiAnalysisPanel({ catalog, initialEtfId }: { catalog: CatalogGro
           <label>Analyse<select aria-label="Analyse" value={target} disabled={Boolean(run) || locked} onChange={(e) => setTarget(e.target.value)}><option value="portfolio">Current portfolio</option>{catalog.map((group) => <optgroup key={group.id} label={group.name}>{group.variants.map((etf) => <option key={etf.id} value={etf.id}>{etf.ticker} · {etf.name}</option>)}</optgroup>)}</select></label>
           <div className="ai-control-row"><label>Model<select aria-label="Model" value={model} disabled={locked || !configuration?.connected} onChange={(e) => { setModel(e.target.value); setEffort(configuration?.models.find((m) => m.id === e.target.value)?.defaultEffort ?? ""); }}>{configuration?.models.length ? configuration.models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>) : <option value="">Connect Codex first</option>}</select></label><label>Reasoning effort<select aria-label="Reasoning effort" value={effort} disabled={locked || !selectedModel?.efforts.length} onChange={(e) => setEffort(e.target.value)}>{selectedModel?.efforts.length ? selectedModel.efforts.map((e) => <option key={e.id} value={e.id}>{e.label}</option>) : <option value="">Model default</option>}</select></label></div>
           <label>Response language<select aria-label="Response language" value={language} disabled={locked} onChange={(e) => setLanguage(e.target.value as "fr" | "en")}><option value="fr">Français</option><option value="en">English</option></select></label>
-          <fieldset className="ai-templates" disabled={Boolean(run) || locked}><legend>Analysis template</legend>{AI_TEMPLATES.map((t) => <button key={t.id} type="button" aria-pressed={template === t.id} className={`ai-template${template === t.id ? " is-selected" : ""}`} onClick={() => setTemplate(t.id)}><strong>{t.title}</strong><span>{t.description}</span></button>)}</fieldset>
+          <fieldset className="ai-templates" disabled={Boolean(run) || locked}><legend>Analysis template</legend>{AI_TEMPLATES.map((t) => <button key={t.id} type="button" aria-pressed={template === t.id} className={`ai-template${template === t.id ? " is-selected" : ""}`} onClick={() => { setTemplate(t.id); setPositionLimit(AI_POSITION_DEFAULTS[t.id]); }}><strong>{t.title}</strong><span>{t.description}</span></button>)}</fieldset>
+          <div className="ai-position-budget">
+            <label htmlFor="ai-position-limit"><span>Top positions to send <output htmlFor="ai-position-limit">{positionLimit}</output></span></label>
+            <input id="ai-position-limit" type="range" min={0} max={AI_MAX_POSITIONS} step={1} value={positionLimit} disabled={locked} aria-describedby="ai-position-limit-help" aria-valuetext={positionLimit === 0 ? "Summary only" : `Up to ${positionLimit} positions`} onChange={(e) => setPositionLimit(Number(e.target.value))} />
+            <div className="ai-range-labels"><span>Summary only</span><span>{AI_MAX_POSITIONS}</span></div>
+            <p id="ai-position-limit-help" className="ai-footnote">{positionLimit === 0 ? "No individual holdings." : `Up to ${positionLimit} holdings, largest weights first.`} Sector and country totals, concentration and cash always cover the full composition.</p>
+            {run && positionLimit !== aiPositionLimit(run.request) ? <p className="ai-footnote">Your next question will include a new snapshot with this position limit.</p> : null}
+          </div>
           <label>{questionLabel}<textarea aria-label={questionLabel} required={questionRequired} value={question} maxLength={4000} rows={4} disabled={locked} placeholder={run ? "Ask about this analysis…" : template === "custom" ? "Write exactly what you want Codex to analyse…" : "Your objectives, time horizon, or a specific question…"} onChange={(e) => setQuestion(e.target.value)} /></label>
           <div className="ai-actions"><button type="button" className="primary-button" disabled={locked || !configuration?.connected || !selectedModel || (questionRequired && !question.trim())} onClick={() => void start()}>{busy ? "Please wait…" : run ? "Send follow-up" : "Start analysis"}</button>{running ? <button type="button" className="secondary-button" disabled={busy} onClick={() => void stop()}>Stop</button> : run ? <button type="button" className="secondary-button" disabled={busy} onClick={() => { setRun(null); setSnapshot(null); setQuestion(""); setError(""); }}>New analysis</button> : null}</div>
+          {run ? <div className="ai-actions"><button type="button" className="secondary-button" disabled={locked || !configuration?.connected || !selectedModel || !question.trim()} onClick={() => void start(true)}>Send with updated holdings</button></div> : null}
+          {run ? <p className="ai-footnote">Follow-ups reuse holdings for 24 hours. Changing the position limit or sending with updated holdings includes a new snapshot.</p> : null}
           <p className="ai-footnote">Each analysis uses your Codex quota. Holdings weights and dates are included; portfolio quantities and account values are excluded.</p>
         </section>
         <section className="panel ai-response" aria-label="Analysis response" aria-busy={locked}>

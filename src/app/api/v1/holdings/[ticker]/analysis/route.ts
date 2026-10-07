@@ -36,7 +36,9 @@ export async function GET(
       {
         headers: {
           "Cache-Control":
-            forceRefresh || target.sourceStatus === "stale" || acwi.sourceStatus === "stale"
+            target.etf.fundType === "portfolio"
+              ? "private, no-store"
+              : forceRefresh || target.sourceStatus === "stale" || acwi.sourceStatus === "stale"
               ? "no-store"
               : "public, max-age=300, s-maxage=86400, stale-while-revalidate=3600",
         },

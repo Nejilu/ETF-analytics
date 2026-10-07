@@ -101,6 +101,7 @@ export interface ConstituentCoverage {
 }
 
 export interface HoldingsSnapshot {
+  portfolioValuation?: import("./portfolio-valuation").PortfolioHoldingsValuation;
   etf: EtfShareClass;
   asOf: string;
   fetchedAt: string;

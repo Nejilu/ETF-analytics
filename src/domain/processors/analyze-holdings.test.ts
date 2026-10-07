@@ -4,6 +4,7 @@ import test from "node:test";
 import type { EtfShareClass, Holding, HoldingsSnapshot } from "../etf";
 import { holdingsCashDisplayPositions } from "../holdings-cash-display";
 import { analyzeHoldings } from "./analyze-holdings";
+import { portfolioHoldingsValuation, portfolioPositionValueUsd } from "../portfolio-valuation";
 
 function snapshot(
   id: string,
@@ -51,6 +52,39 @@ function holding(
     weight,
   };
 }
+
+test("portfolio analysis keeps NAV amounts, shorts and leverage across weight and cash displays", () => {
+  const target = snapshot("portfolio", "PORT", [
+    holding("A", "A", 180),
+    holding("B", "B", -30),
+    holding("USD", "USD", -60, "Cash"),
+    holding("EUR", "EUR", 10, "Cash"),
+  ]);
+  target.etf.fundType = "portfolio";
+  target.portfolioValuation = portfolioHoldingsValuation(10000, [{
+    id: "private-item-id", kind: "security", referenceId: "A", ticker: "A", name: "A",
+    allocationWeight: 180, quantity: 90, currentValueUsd: 18000,
+    inputAmount: 18000, initialValueUsd: 17000,
+  }], [{ currency: "USD", amount: -6000, valueUsd: -6000 }, { currency: "EUR", amount: 900, valueUsd: 1000 }]);
+  const result = analyzeHoldings(target, snapshot("acwi-us", "ACWI", [holding("A", "A", 100)]));
+  assert.deepEqual(result.portfolioValuation, target.portfolioValuation);
+  const a = result.positions.find((p) => p.ticker === "A")!;
+  const b = result.positions.find((p) => p.ticker === "B")!;
+  assert.equal(a.publishedWeight, 180);
+  assert.equal(a.normalizedWeightExCash, 120);
+  assert.equal(b.publishedWeight, -30);
+  assert.equal(portfolioPositionValueUsd(a.publishedWeight, result.portfolioValuation!), 18000);
+  assert.equal(portfolioPositionValueUsd(b.publishedWeight, result.portfolioValuation!), -3000);
+  const combinedCash = holdingsCashDisplayPositions(result.positions, "combined").find((p) => p.isCash)!;
+  assert.equal(portfolioPositionValueUsd(combinedCash.publishedWeight, result.portfolioValuation!), -5000);
+  assert.equal(result.portfolioValuation!.cash[1].weight, 10);
+  assert.equal(result.portfolioValuation!.items[0].quantity, 90);
+  assert(!JSON.stringify(result.portfolioValuation).includes("private-item-id"));
+  assert(!JSON.stringify(result.portfolioValuation).includes("initialValueUsd"));
+
+  target.etf.fundType = "physical";
+  assert.equal(analyzeHoldings(target, target).portfolioValuation, undefined);
+});
 
 test("returns zero when the ETF matches its ACWI-implied free-float weights", () => {
   const acwi = snapshot("acwi-us", "ACWI", [

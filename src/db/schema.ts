@@ -17,6 +17,8 @@ export const aiAnalysisRuns = sqliteTable("ai_analysis_runs", {
   title: text("title").notNull(),
   requestJson: text("request_json").notNull(),
   pendingMessageId: text("pending_message_id"),
+  snapshotSentAt: text("snapshot_sent_at"),
+  pendingSnapshotSentAt: text("pending_snapshot_sent_at"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (table) => [check("ai_analysis_runs_request_json_valid", sql`json_valid(${table.requestJson})`)]);

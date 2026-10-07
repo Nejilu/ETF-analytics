@@ -1,6 +1,8 @@
 "use client";
 
 import { HoldingsSourceWarning } from "./holdings-source-warning";
+import { PortfolioValuationPanel, formatPortfolioUsd } from "./portfolio-valuation-panel";
+import { portfolioPositionValueUsd } from "@/domain/portfolio-valuation";
 
 import { useMemo, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
@@ -1177,7 +1179,7 @@ function HoldingsTopPositionsPanel({
           Top 10 · {weightView === "with-cash" ? "with cash" : "securities"}
         </span>
       </div>
-      <div className="holdings-top-list">
+      <div className={`holdings-top-list${analysis.portfolioValuation ? " holdings-top-list--valued" : ""}`}>
         {positions.map((position) => (
           <div key={position.securityId} className={position.displayWeight < 0 ? "is-negative" : undefined}>
             <div>
@@ -1192,7 +1194,10 @@ function HoldingsTopPositionsPanel({
                 }}
               />
             </div>
-            <strong>{formatPercent(position.displayWeight, 2)}</strong>
+            <strong>
+              {formatPercent(position.displayWeight, 2)}
+              {analysis.portfolioValuation ? <span>{formatPortfolioUsd(portfolioPositionValueUsd(position.publishedWeight, analysis.portfolioValuation))}</span> : null}
+            </strong>
           </div>
         ))}
       </div>
@@ -1256,6 +1261,7 @@ function HoldingsOverviewTable({
             <tr>
               <th>Security</th>
               <th>Weight</th>
+              {analysis.portfolioValuation ? <th>Exposure (USD)</th> : null}
               <th>Sector</th>
               <th>Country</th>
               <th>Asset class</th>
@@ -1263,7 +1269,7 @@ function HoldingsOverviewTable({
           </thead>
           <tbody id="holdings-overview-positions">
             {matchingRows.length === 0 ? (
-              <tr><td colSpan={5} className="holdings-table-empty">No holdings match your search.</td></tr>
+              <tr><td colSpan={analysis.portfolioValuation ? 6 : 5} className="holdings-table-empty">No holdings match your search.</td></tr>
             ) : null}
             {visibleRows.map((position) => (
               <tr
@@ -1282,6 +1288,7 @@ function HoldingsOverviewTable({
                   </div>
                 </td>
                 <td className={position.displayWeight < 0 ? "negative-position-weight" : undefined}>{formatPercent(position.displayWeight, 2)}</td>
+                {analysis.portfolioValuation ? <td>{formatPortfolioUsd(portfolioPositionValueUsd(position.publishedWeight, analysis.portfolioValuation))}</td> : null}
                 <td>{position.isCash ? "Cash & equivalents" : position.sector}</td>
                 <td>{position.country}</td>
                 <td>{position.assetClass}</td>
@@ -1817,6 +1824,8 @@ export function ComparisonWorkbench({
               </section>
 
               {error && <div className="alert alert--error">{error}</div>}
+              {analysis?.portfolioValuation ? <PortfolioValuationPanel ticker={analysis.etf.ticker} valuation={analysis.portfolioValuation} /> : null}
+              {comparisonMode && rightAnalysis?.portfolioValuation ? <PortfolioValuationPanel ticker={rightAnalysis.etf.ticker} valuation={rightAnalysis.portfolioValuation} /> : null}
               <HoldingsSourceWarning issues={[...(analysis?.sourceIssues ?? []), ...(comparisonMode ? rightAnalysis?.sourceIssues ?? [] : []), ...(comparison?.left.sourceIssues ?? []), ...(comparison?.right.sourceIssues ?? [])]} />
 
               {analysis ? (

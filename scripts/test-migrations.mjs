@@ -264,6 +264,16 @@ try {
     ],
   );
 
+  executeMigration("0015_ai_analysis_runs.sql");
+  sqlite.prepare(`INSERT INTO ai_analysis_runs
+    (id, environment_id, thread_id, title, request_json, created_at, updated_at)
+    VALUES ('legacy-analysis', 'test', 'thread', 'Saved analysis', '{}', '2026-10-01', '2026-10-01')`).run();
+  executeMigration("0016_ai_snapshot_reuse.sql");
+  assert.deepEqual(sqlite.prepare(`SELECT title, snapshot_sent_at, pending_snapshot_sent_at
+    FROM ai_analysis_runs WHERE id = 'legacy-analysis'`).get(), {
+    title: "Saved analysis", snapshot_sent_at: null, pending_snapshot_sent_at: null,
+  });
+
   console.log("Migration smoke test passed.");
 } finally {
   sqlite.close();

@@ -52,6 +52,16 @@ login. The temporary setup session is revoked. The backend credential expires;
 the script reports its lifetime, and can be rerun to renew it. Revoke superseded
 backend sessions in T3's access settings. Never commit credential files.
 
+For unattended renewal, run `node scripts/renew-ai-t3.mjs` daily on the same
+T3 host. It verifies the current session, renews only within seven days of expiry
+or after expiration/revocation, and verifies the new credential and its scopes.
+Failed renewal restores the previous file contents. Writes preserve the file
+inode so a running application's bind mount sees the new token. Existing
+sessions remain valid until their natural expiry, preserving in-flight analyses.
+`--force` performs an immediate rotation for operational validation.
+The VPS Ansible role installs and enables a persistent systemd timer; local
+installations need their own scheduler. This does not renew a revoked Codex login.
+
 | Environment variable | Default / purpose |
 | --- | --- |
 | `T3_BASE_URL` | Required in the app; T3 origin, e.g. `http://127.0.0.1:3773` locally or `http://agents-codex:3773` on the VPS private Docker network |
@@ -83,10 +93,28 @@ on either Git branch does not publish it or configure production.
 
 ## Data and streaming
 
-Each turn reads canonical application data on the server. It includes full
-sector/country aggregates and up to 200 positions ranked by absolute weight,
-with omitted counts and exposure explicitly reported. Signed NAV weights,
-cash, financing, source dates, source failures and stale quotes are retained.
+The first turn reads canonical application data on the server. Follow-ups reuse
+the last snapshot sent in that conversation for less than 24 hours; they send
+the question and research instructions without repeating the holdings JSON or
+reading a new composition. After 24 hours, or when the owner uses **Send with
+updated holdings**, the next follow-up includes a new snapshot. The deadline
+starts at the last snapshot send, not at the latest question, and survives
+application restarts. Older conversations without a recorded snapshot timestamp
+refresh on their next follow-up. Failed sends do not reset the deadline.
+
+Each snapshot includes full sector/country/asset-class aggregates, top-ten
+concentration, signed exposure and cash. The position slider selects 0–200
+holdings ranked by absolute weight; zero sends only the summary. Defaults are
+20 for Custom, Global analysis and Portfolio coherence, 30 for Main positions,
+and 10 for Diversification or Recent news. Each holding contains only ticker,
+name and weight; percentages are rounded to at most two decimals after
+aggregation. Omitted counts and gross weight remain explicit. Allocation
+sleeves, also capped by the slider, accompany Custom, Global, Diversification
+and Coherence templates; news and position research omit them. Prices and
+internal security IDs are not repeated. Source dates, failures and coverage
+remain available. Changing the limit sends a fresh snapshot even within
+24 hours; the accepted limit survives restarts and failed dispatches. Older
+conversations refresh once to adopt the compact format.
 Quantities, account values and cash amounts are excluded. Cached app quotes
 are not presented as real-time prices; the prompt requires web verification
 and dated sources, and disclosure if live research fails.

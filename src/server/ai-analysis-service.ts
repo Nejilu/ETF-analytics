@@ -1,8 +1,8 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { AiError, type AiAnalysisRequest, type AiConfiguration, type AiSnapshot } from "@/domain/ai-analysis";
-import { loadAiRun, pendingAiRunIds, publicAiRun, releaseAiTurn, reserveAiTurn, saveAiRun, type StoredAiRun } from "@/db/repositories/ai-analysis-repository";
-import { analysisContext, analysisPrompt } from "./ai-context";
+import { AiError, aiPositionLimit, type AiAnalysisRequest, type AiConfiguration, type AiSnapshot } from "@/domain/ai-analysis";
+import { confirmAiSnapshotSent, loadAiRun, pendingAiRunIds, publicAiRun, releaseAiTurn, reserveAiTurn, saveAiRun, type StoredAiRun } from "@/db/repositories/ai-analysis-repository";
+import { analysisContext, analysisPrompt, needsAiSnapshot } from "./ai-context";
 import { analysisModels, T3Client } from "./t3-client";
 
 export async function aiConfiguration(): Promise<AiConfiguration> {
@@ -26,6 +26,10 @@ export async function aiSnapshot(id: string): Promise<AiSnapshot> {
   const t3 = await runConnection(run);
   const { thread } = await t3.client.thread(run.threadId);
   const pendingSeen = !run.pendingMessageId || thread.messages.some((m) => m.id === run.pendingMessageId);
+  if (pendingSeen && run.pendingMessageId && run.pendingSnapshotSentAt) {
+    confirmAiSnapshotSent(run.id, run.pendingMessageId);
+    run.snapshotSentAt = run.pendingSnapshotSentAt;
+  }
   const dispatchExpired = !pendingSeen && Date.now() - Date.parse(run.updatedAt ?? run.createdAt) > 90_000;
   const state = dispatchExpired ? "error" : !pendingSeen ? "starting" : thread.latestTurn?.state ?? (run.pendingMessageId ? "starting" : "completed");
   // Deny requests to expand permissions. This panel is for research only;
@@ -45,11 +49,12 @@ export async function aiSnapshot(id: string): Promise<AiSnapshot> {
 }
 
 function displayUserMessage(prompt: string): string {
-  const match = prompt.match(/Owner's additional question[^\n]*:\n([\s\S]*?)\n<application_snapshot>/);
+  const match = prompt.match(/Owner's additional question[^\n]*:\n([\s\S]*?)\n<application_snapshot(?:_reference)?>/);
   return match?.[1] && match[1] !== "None." ? match[1] : "Analyse the selected holdings with the chosen template.";
 }
 
 export async function startAiAnalysis(request: AiAnalysisRequest) {
+  request = { ...request, positionLimit: aiPositionLimit(request) };
   const t3 = await T3Client.configured();
   const config = await t3.client.rpc<Parameters<typeof analysisModels>[0]>("server.getConfig", {});
   const { models } = analysisModels(config, t3.instanceId);
@@ -62,27 +67,30 @@ export async function startAiAnalysis(request: AiAnalysisRequest) {
     if (JSON.stringify(run.request.target) !== JSON.stringify(request.target)) throw new AiError(400, "Start a new analysis to change the ETF or portfolio.");
     const snapshot = await aiSnapshot(run.id);
     if (snapshot.state === "running" || snapshot.state === "starting") throw new AiError(409, "An analysis is already running in this conversation.");
+    run = loadAiRun(run.id);
   }
-  const { title, context } = await analysisContext(request);
-  const prompt = analysisPrompt(request, context);
+  const includeSnapshot = needsAiSnapshot(request, run?.snapshotSentAt ?? null) || run?.snapshotPositionLimit !== request.positionLimit;
+  const data = includeSnapshot ? await analysisContext(request) : undefined;
+  const createdAt = new Date().toISOString();
+  const prompt = analysisPrompt(request, data?.context, createdAt, run?.snapshotSentAt ?? null);
   // Agents continue when a tab is closed. Reconcile finished reservations
   // before admitting a new turn, even if no browser watched their completion.
   await Promise.allSettled(pendingAiRunIds(t3.descriptor.environmentId).map(aiSnapshot));
-  const createdAt = new Date().toISOString();
   const messageId = randomUUID();
   const modelSelection = { instanceId: t3.instanceId, model: request.model, options: request.effort ? [{ id: "reasoningEffort", value: request.effort }] : [] };
   if (!run) {
     const shell = await t3.client.http<{ projects: { id: string }[] }>("/api/orchestration/shell");
     if (!shell.projects.some((p) => p.id === t3.projectId)) throw new AiError(503, "The dedicated analysis project is missing in T3. Run the connection setup on the T3 host.");
-    run = { id: randomUUID(), environmentId: t3.descriptor.environmentId, threadId: randomUUID(), title, request, pendingMessageId: null, createdAt };
-    await t3.client.dispatch({ type: "thread.create", commandId: randomUUID(), threadId: run.threadId, projectId: t3.projectId, title: `Analysis · ${title}`.slice(0, 180), modelSelection, runtimeMode: "approval-required", interactionMode: "default", branch: null, worktreePath: null, createdAt });
+    run = { id: randomUUID(), environmentId: t3.descriptor.environmentId, threadId: randomUUID(), title: data!.title, request, pendingMessageId: null, snapshotSentAt: null, pendingSnapshotSentAt: null, createdAt };
+    await t3.client.dispatch({ type: "thread.create", commandId: randomUUID(), threadId: run.threadId, projectId: t3.projectId, title: `Analysis · ${run.title}`.slice(0, 180), modelSelection, runtimeMode: "approval-required", interactionMode: "default", branch: null, worktreePath: null, createdAt });
     saveAiRun(run);
   }
-  if (!reserveAiTurn(run.id, messageId, request)) throw new AiError(409, "An analysis is already starting in this conversation.");
+  if (!reserveAiTurn(run.id, messageId, request, includeSnapshot ? createdAt : null)) throw new AiError(409, "An analysis is already starting in this conversation.");
   // A timeout can hide an accepted dispatch. Keep the reservation until a
   // snapshot confirms the outcome rather than risking a duplicate turn.
   await t3.client.dispatch({ type: "thread.turn.start", commandId: randomUUID(), threadId: run.threadId, message: { messageId, role: "user", text: prompt, attachments: [] }, modelSelection, runtimeMode: "approval-required", interactionMode: "default", createdAt });
-  return publicAiRun({ ...run, request });
+  confirmAiSnapshotSent(run.id, messageId);
+  return publicAiRun(loadAiRun(run.id));
 }
 
 export async function interruptAiAnalysis(id: string) {

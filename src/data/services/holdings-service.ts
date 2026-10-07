@@ -1,6 +1,7 @@
 import { sourceFailure } from "@/data/providers/holdings-request";
 import { holdingsSourceIssues } from "@/domain/holdings-source-issues";
 import "server-only";
+import { portfolioHoldingsValuation } from "@/domain/portfolio-valuation";
 
 import { createHash } from "node:crypto";
 
@@ -194,6 +195,11 @@ async function buildPortfolioEtfSnapshot(
       })),
       ...explicitCashHoldings,
     ],
+    portfolioValuation: portfolioHoldingsValuation(
+      valuedPortfolio.totalMarketValueUsd,
+      valuedPortfolio.items,
+      cashPositions,
+    ),
   };
 }
 

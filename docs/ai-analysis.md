@@ -10,14 +10,14 @@ The Custom template requires your own question and adds no predefined analysis
 prompt. The selected holdings snapshot and shared research instructions still
 accompany the question.
 
-## Access and branches
+## Access modes
 
-On `main`, AI APIs are restricted to loopback hosts and same-origin mutations.
-Use the application on `localhost`; bind local development to loopback when
-connecting an agent. The deployment branch replaces `requireAiAccess` with
-the existing signed Cloudflare Access owner check and hides the panel from
-visitors. Every AI endpoint, including history, interruption and live events,
-passes this check. Stream requests revalidate access during polling.
+Both modes use the same code on `main`. Local mode restricts AI APIs to loopback
+hosts and same-origin mutations, without an administrator login. Web mode uses
+signed Cloudflare Access owner verification and hides the panel from visitors.
+Every AI endpoint, including history, interruption and live events, passes
+this check before database or T3 access. Stream requests revalidate access
+during polling. Each installation keeps its own backend URL and credential file.
 
 ## Connect T3
 

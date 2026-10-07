@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import nextEnv from "@next/env";
 
 import { prepareStandaloneAssets } from "./start-standalone-assets.mjs";
 
@@ -11,13 +12,14 @@ const serverPath = resolve(projectRoot, ".next", "standalone", "server.js");
 export function standaloneEnvironment(env = process.env) {
   return {
     ...env,
-    HOSTNAME: env.BIND_HOST?.trim() || "0.0.0.0",
+    HOSTNAME: env.BIND_HOST?.trim() || (env.SITE_ACCESS_MODE === "cloudflare" ? "0.0.0.0" : "127.0.0.1"),
     DRIZZLE_MIGRATIONS_PATH: env.DRIZZLE_MIGRATIONS_PATH ??
       resolve(projectRoot, "drizzle"),
   };
 }
 
 export function startStandalone() {
+  nextEnv.loadEnvConfig(projectRoot, false);
   if (!existsSync(serverPath)) {
     console.error("Standalone server is missing. Run npm run build first.");
     process.exitCode = 1;

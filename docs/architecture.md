@@ -19,7 +19,7 @@ flowchart LR
   H --> J[Derived metrics]
   I --> J
   J --> K[ETF aggregates and API response]
-  K --> L[Result cache and ETag]
+  K --> L[Result cache and access projection]
 ```
 
 API handlers validate HTTP input and delegate to services. Services coordinate
@@ -186,11 +186,10 @@ are batched.
 
 The bounded Metrics Overview result cache holds up to eight selections. Complete
 and stale results have a 60-second in-process TTL; partial results have a
-five-minute TTL. These are separate from the source TTLs and HTTP caching. HTTP
-responses for stale results use `no-store`; partial responses use private
-caching. The response is serialized once and its ETag
-is computed from those exact bytes, so any field, order, counter, or warning
-change produces a new `200` response instead of `304`.
+five-minute TTL. These are separate from the source TTLs. The underlying response
+helper computes an ETag from serialized bytes, but the website access boundary
+removes conditional request headers and ETags and returns `private, no-store`.
+Every website request is authorized and projected against current visibility.
 
 Two measured hot paths—latest numeric metrics and EPS series—use parameterized
 SQL followed by TypeScript reconstruction and validation. Other database access
@@ -211,8 +210,29 @@ outside the current design.
 Changes to provider identity, missing-versus-failed semantics, aggregation
 formulas, source status, ETag construction, or the v1 DTO require focused tests.
 Run the standard test, typecheck, lint, mapping audit, and production build
-before release. The current GitHub Actions workflow checks Windows installation,
-database setup, and typecheck; it does not run the full release validation.
+before release. GitHub Actions checks Windows installation, database setup,
+typecheck and tests. The Linux job also runs lint and the production build.
 Performance changes must be justified by an end-to-end profile;
 past micro-optimisations are not active documentation and remain available in
 Git history.
+
+## Website access and publication
+
+The canonical `main` branch has a server-side access boundary on every v1 route and the page.
+Local mode gives full access on loopback without authentication or publication UI,
+including compiled local runs. Web mode adds visitor and owner roles; Docker and
+the web systemd service explicitly select it. Access settings are resolved at runtime.
+Cloudflare Access authenticates the owner; the application validates its signed
+JWT and restricts writes to the owner origin. Public requests receive a filtered
+catalog and projected analysis DTOs. Canonical provider identities and database
+values remain unchanged. Exact amounts use an allowlisted valuation DTO in
+Holdings analysis and a separate published-portfolio read endpoint, both limited
+to fully public portfolios. Weights-only analysis omits the valuation entirely;
+owner analysis retains it regardless of publication mode. Private definitions
+remain owner-only.
+
+Website responses use `private, no-store`. The Metrics computation cache remains active and
+its keys include a publication revision. Writes invalidate that revision, including
+in-flight reuse; public responses that overlap a write are rejected. A dependency
+on a private ETF makes the derived ETF unavailable publicly. See
+[website deployment](site-deployment.md) for configuration and visibility rules.

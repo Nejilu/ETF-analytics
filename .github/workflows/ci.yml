@@ -34,3 +34,22 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Test local and web modes
+        run: npm test
+
+  production-build:
+    name: Canonical application production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build

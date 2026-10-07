@@ -58,6 +58,7 @@ export const etfs = sqliteTable(
     productUrl: text("product_url").notNull(),
     holdingsUrl: text("holdings_url").notNull(),
     priceSymbol: text("price_symbol"),
+    visibility: text("visibility", { enum: ["private", "weights", "public"] }).notNull().default("private"),
     fundType: text("fund_type").notNull().default("physical"),
     portfolioId: text("portfolio_id"),
     description: text("description"),

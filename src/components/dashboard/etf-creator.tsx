@@ -1,5 +1,8 @@
 "use client";
 
+import { VisibilitySelect } from "./visibility-select";
+import type { EtfVisibility } from "@/domain/visibility";
+
 import { useEffect, useMemo, useState } from "react";
 
 import type {
@@ -23,6 +26,7 @@ import { EtfSearch } from "./etf-search";
 import { ManualRefreshButton } from "./manual-refresh-button";
 
 interface EtfCreatorProps {
+  publicationEnabled: boolean;
   catalog: CatalogGroup[];
   onCatalogChanged: () => Promise<void>;
 }
@@ -120,6 +124,7 @@ function FilterOptions({
 }
 
 export function EtfCreator({
+  publicationEnabled,
   catalog,
   onCatalogChanged,
 }: EtfCreatorProps) {
@@ -187,6 +192,7 @@ export function EtfCreator({
   const [ticker, setTicker] = useState("");
   const [name, setName] = useState("My Custom ETF");
   const [description, setDescription] = useState("");
+  const [visibility, setVisibility] = useState<EtfVisibility>("weights");
   const [saving, setSaving] = useState(false);
   const [savedEtf, setSavedEtf] = useState<EtfShareClass | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -487,6 +493,7 @@ export function EtfCreator({
     setTicker("");
     setName("My Custom ETF");
     setDescription("");
+    setVisibility("weights");
     setSavedEtf(null);
     changeSourceEtf(defaultSourceEtfId);
     setCompositionDirty(false);
@@ -516,6 +523,7 @@ export function EtfCreator({
       setTicker(detail.etf.ticker);
       setName(detail.etf.name);
       setDescription(detail.editableDescription);
+      setVisibility(detail.etf.visibility ?? "weights");
       setCountryMode(detail.criteria.countryMode);
       setCountries(detail.criteria.countries);
       setSectorMode(detail.criteria.sectorMode);
@@ -609,6 +617,7 @@ export function EtfCreator({
           ticker,
           name,
           description,
+          visibility,
           selectedSecurityIds: [
             ...selectedHoldings.map((holding) => holding.securityId),
             ...(!compositionDirty ? editUnavailableSelectedIds : []),
@@ -1090,6 +1099,7 @@ export function EtfCreator({
                 onChange={(event) => setName(event.target.value)}
               />
             </label>
+            {publicationEnabled && <VisibilitySelect value={visibility} onChange={setVisibility} etfId={workflowMode === "edit" ? editingEtfId : undefined} onSaved={onCatalogChanged} disabled={saving} />}
             <label className="field creator-description-field">
               <span>Description (optional)</span>
               <textarea

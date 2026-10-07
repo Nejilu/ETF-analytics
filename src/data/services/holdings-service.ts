@@ -1,5 +1,6 @@
 import { sourceFailure } from "@/data/providers/holdings-request";
 import { holdingsSourceIssues } from "@/domain/holdings-source-issues";
+import { catalogRevision } from "@/server/site-runtime";
 import "server-only";
 import { portfolioHoldingsValuation } from "@/domain/portfolio-valuation";
 
@@ -484,11 +485,9 @@ export async function getHoldingsSnapshot(
       error,
     );
   }
-  const cacheKey = `${databasePath()}::${etf.id}::${options.forceRefresh ? "force" : "cached"}`;
+  const cacheKey = `${databasePath()}::${catalogRevision()}::${etf.id}::${options.forceRefresh ? "force" : "cached"}`;
   const existing = inFlightRefreshes.get(cacheKey)
-    ?? (!options.forceRefresh
-      ? inFlightRefreshes.get(`${databasePath()}::${etf.id}::force`)
-      : undefined);
+    ?? (!options.forceRefresh ? inFlightRefreshes.get(`${databasePath()}::${catalogRevision()}::${etf.id}::force`) : undefined);
   if (existing) return existing;
 
   const refresh = refreshHoldings(etf, options)

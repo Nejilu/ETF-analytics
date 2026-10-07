@@ -1,5 +1,11 @@
 # Weightings Analytics
 
+`main` is the canonical source for both local and web installations. Local mode
+provides all tools without login or publication controls. Web mode adds visitor
+and authenticated administrator access through Cloudflare, with private,
+weights-only or public portfolio visibility. See
+[website deployment](docs/site-deployment.md) for the web configuration.
+
 Weightings Analytics is a local-first Next.js application for analysing ETF
 holdings, comparing underlying exposures, building look-through portfolios,
 and creating reusable ETFs from iShares source universes.
@@ -28,8 +34,12 @@ An internet connection is needed to load new provider data.
 
 ```bash
 npm ci
-npm run dev
 ```
+
+Run `npm run dev`. The default is local mode on loopback; no access configuration
+or administrator login is required. Optional settings belong in `.env.local`
+or `.env.development.local`. Use `SITE_ACCESS_MODE=local` to explicitly select
+local mode when web settings also exist on the machine.
 
 Open `http://localhost:3000`. The development launcher applies committed SQLite
 migrations and idempotently seeds the ETF catalog before starting Next.js.
@@ -41,7 +51,13 @@ Use `npm ci` for a fresh checkout and stop if it reports an error. Do not copy o
 cache `node_modules` between machines; the GitHub Actions workflow caches only
 npm downloads and rebuilds dependencies from `package-lock.json` on every run.
 
-## Production-like local run
+## Production run
+
+The compiled application also supports local mode. With no access settings,
+`npm run start` listens on `127.0.0.1` and gives full access without login.
+To host the web version, configure `SITE_ACCESS_MODE=cloudflare`, Cloudflare
+Access and the environment described in [website deployment](docs/site-deployment.md).
+The same build supports both modes; the choice is made on the server at runtime.
 
 ```bash
 npm ci
@@ -49,14 +65,15 @@ npm run build
 npm run start
 ```
 
-The application is served at `http://localhost:3000`. The standalone launcher
+Open `http://localhost:3000` locally, or the configured HTTPS public or owner
+domain for a web installation. The standalone launcher
 keeps database and migration paths anchored to the project root and stages the
 required static assets before starting the generated server. Check
 `/api/health` to verify application and SQLite readiness (`200` when healthy,
 `503` otherwise). This endpoint does not check external provider availability.
 `npm run start` also applies migrations and seeds the catalog before launch.
 
-## Provider access
+## Provider access from servers
 
 iShares/BlackRock may reject datacenter IPs (HTTP 403), even when the same
 request succeeds from a residential connection. Expect this possibility when
@@ -68,18 +85,27 @@ with the error code and original holdings date, including affected dependencies.
 A successful refresh clears the warning. HTTP 403/429/5xx, network failures and
 invalid responses are distinguished; no substitute holdings are fabricated.
 
-Test provider downloads from the runtime before choosing a remedy. The optional
-`ISHARES_RELAY_URL` routes only iShares/BlackRock requests through an HTTPS relay;
-direct access remains the default. Restrict any relay to approved provider URLs
-and callers. This project does not provision one automatically.
+Operators should test provider downloads from their deployment before choosing
+a remedy: an optional restricted Cloudflare Worker relay, an authorised outbound
+proxy, another usable network, or a supported data feed. Worker/datacenter
+addresses can also be blocked. The project does not require Cloudflare Workers
+and never provisions a proxy automatically. See the [optional relay setup](deploy/ishares-relay/README.md)
+for configuration, limits, testing and rollback.
 
 ## Configuration
 
-Copy `.env.example` to `.env` only when overriding a default.
+Use `.env.example` as the local configuration template. Web access settings are
+required only for web installations. Docker and the web systemd service explicitly
+select Cloudflare access; missing settings deny access. The systemd service reads
+`/etc/weightings-analytics.env`. Local public-preview settings belong in
+`.env.development.local`, with `SITE_LOCAL_PUBLIC_PREVIEW=true`; this optional
+development view uses `localhost` for the administrator and `127.0.0.1` for the visitor.
 
 | Variable | Default | Valid values / purpose |
 | --- | ---: | --- |
-| `BIND_HOST` | `0.0.0.0` | Standalone listen address; set in the shell environment, e.g. `127.0.0.1` for loopback only. Overrides Docker's automatic `HOSTNAME`. |
+| `SITE_ACCESS_MODE` | `local` | `local`: full loopback access, no login; `cloudflare`: web visitor/admin access. Existing web settings without a mode still select Cloudflare and deny access if incomplete. |
+| `SITE_LOCAL_PUBLIC_PREVIEW` | unset | Development-only visitor/admin preview when `true`; leave unset for ordinary local use. |
+| `BIND_HOST` | `127.0.0.1` locally | Standalone listen address, loaded from the environment or `.env.local`; defaults to `0.0.0.0` for explicit Cloudflare mode. Overrides the machine's `HOSTNAME`. |
 | `DATABASE_PATH` | `.data/weightings-analytics.sqlite` | Durable SQLite database path |
 | `DRIZZLE_MIGRATIONS_PATH` | `drizzle` | Migration directory; useful when embedded in another runtime image |
 | `HOLDINGS_CACHE_TTL_SECONDS` | `86400` | Positive holdings snapshot TTL |
@@ -150,11 +176,17 @@ share class. The endpoints are:
 - `GET /api/v1/prices/fx?currency=EUR`
 - `POST /api/v1/etf-creator`
 - `GET|PATCH|DELETE /api/v1/local-etfs/:etfId`
+- `PATCH /api/v1/local-etfs/:etfId/visibility` (owner only)
+- `GET /api/v1/published-portfolios/:etfId` (fully public portfolios only)
 - `GET /api/v1/metrics/overview?etfs=ivv-us,acwi-us`
 
 Comparison excludes cash by default. Add `includeCash=true` to include it in
 weight normalization, overlap, and active-sleeve calculations. Metrics Overview
 accepts one to four distinct ETFs after reference resolution.
+
+Portfolio and ETF editing routes require owner access, including their GET
+endpoints. Public catalog and analysis routes exclude private ETFs and personal
+amounts; exact published amounts use the dedicated published-portfolios route.
 
 Add `refresh=true` to holdings, holdings analysis, comparison, portfolio, single
 quote, or Metrics Overview requests to request fresh source data. Provider

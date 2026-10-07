@@ -27,6 +27,7 @@ CLAUDE.md
 /reports/
 /screenshots/
 /playwright-report/
+/.playwright-cli/
 /test-results/
 /coverage/
 /logs/

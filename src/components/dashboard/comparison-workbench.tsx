@@ -4,7 +4,7 @@ import { HoldingsSourceWarning } from "./holdings-source-warning";
 import { PortfolioValuationPanel, formatPortfolioUsd } from "./portfolio-valuation-panel";
 import { portfolioPositionValueUsd } from "@/domain/portfolio-valuation";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useRef, useMemo, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import {
   Bar,
@@ -19,8 +19,7 @@ import {
   YAxis,
 } from "recharts";
 
-import { PortfolioAnalytics } from "@/components/dashboard/portfolio-analytics";
-import { EtfCreator } from "@/components/dashboard/etf-creator";
+import { PublicationManager } from "./publication-manager";
 import { ManualRefreshButton } from "@/components/dashboard/manual-refresh-button";
 import type {
   CatalogGroup,
@@ -41,6 +40,9 @@ import {
 import { holdingsCashDisplayPositions, type HoldingsCashDisplay } from "@/domain/holdings-cash-display";
 import { EtfSearch } from "./etf-search";
 
+const PortfolioAnalytics = dynamic(() => import("./portfolio-analytics").then((module) => module.PortfolioAnalytics));
+const EtfCreator = dynamic(() => import("./etf-creator").then((module) => module.EtfCreator));
+
 const MetricsOverview = dynamic(
   () => import("@/components/dashboard/metrics-overview").then((module) => module.MetricsOverview),
   {
@@ -52,8 +54,12 @@ const MetricsOverview = dynamic(
 const AiAnalysisPanel = dynamic(() => import("./ai-analysis-panel").then((module) => module.AiAnalysisPanel), { ssr: false });
 
 interface ComparisonWorkbenchProps {
+  siteMode: "local" | "web";
+  owner: boolean;
+  ownerOrigin: string;
+  publicOrigin: string;
+  catalogRevision: string;
   catalog: CatalogGroup[];
-  aiAnalysisEnabled?: boolean;
 }
 
 type SelectionSide = "left" | "right";
@@ -1371,10 +1377,11 @@ function DataUnavailableState({
 }
 
 export function ComparisonWorkbench({
-  catalog,
-  aiAnalysisEnabled = true,
+  catalog, owner, siteMode, ownerOrigin, publicOrigin, catalogRevision,
 }: ComparisonWorkbenchProps) {
   const [availableCatalog, setAvailableCatalog] = useState(catalog);
+  const revision = useRef(catalogRevision);
+  const [resultRevision, setResultRevision] = useState(catalogRevision);
   const [workspaceView, setWorkspaceView] = useState<
     "compare" | "portfolio" | "creator" | "metrics" | "ai"
   >("compare");
@@ -1450,7 +1457,39 @@ export function ComparisonWorkbench({
     setAvailableCatalog(payload.data);
   };
 
+  useEffect(() => {
+    const controller = new AbortController();
+    const sync = async () => {
+      try {
+        const response = await fetch("/api/v1/catalog", { cache: "no-store", signal: controller.signal });
+        if (response.status === 403 && owner) { window.location.assign(ownerOrigin); return; }
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (!payload.data || controller.signal.aborted) return;
+        setAvailableCatalog(payload.data);
+        if (payload.revision !== revision.current) {
+          revision.current = payload.revision;
+          setResultRevision(payload.revision);
+          setAnalysis(null);
+          setRightAnalysis(null);
+          setComparison(null);
+        }
+      } catch { /* Keep the current view during a temporary network failure. */ }
+    };
+    const onFocus = () => { if (!document.hidden) void sync(); };
+    const timer = setInterval(onFocus, 30_000);
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    void sync();
+    return () => {
+      controller.abort(); clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [owner, ownerOrigin]);
+
   const loadHoldingsAnalysis = async (forceRefresh = false) => {
+    const startedRevision = revision.current;
     setLoading(true);
     setError(null);
     setUnavailable([]);
@@ -1497,6 +1536,7 @@ export function ComparisonWorkbench({
         );
         return;
       }
+      if (startedRevision !== revision.current) return;
       setAnalysis(analysisPayload.data);
 
       if (comparisonResponse && rightAnalysisResponse) {
@@ -1513,6 +1553,7 @@ export function ComparisonWorkbench({
           );
           return;
         }
+        if (startedRevision !== revision.current) return;
         setRightAnalysis(rightAnalysisPayload.data);
         const comparisonPayload = (await comparisonResponse.json()) as {
           data?: ComparisonResult;
@@ -1525,6 +1566,7 @@ export function ComparisonWorkbench({
             `The ${leftEtf?.ticker ?? "primary ETF"} deep dive loaded, but the optional comparison is unavailable. ${comparisonPayload.error ?? ""}`.trim(),
           );
         } else {
+          if (startedRevision !== revision.current) return;
           setComparison(comparisonPayload.data);
         }
       }
@@ -1543,6 +1585,7 @@ export function ComparisonWorkbench({
   };
 
   const changeHoldingsWeightView = async (next: HoldingsWeightView) => {
+    const startedRevision = revision.current;
     if (next === holdingsWeightView) return;
     if (
       !comparisonMode ||
@@ -1574,6 +1617,7 @@ export function ComparisonWorkbench({
         );
         return;
       }
+      if (startedRevision !== revision.current) return;
       setComparison(payload.data);
       setHoldingsWeightView(next);
     } catch (requestError) {
@@ -1609,6 +1653,7 @@ export function ComparisonWorkbench({
             <span className="nav-icon">◎</span>
             Holdings
           </button>
+          {owner && <>
           <button
             className={`nav-item${workspaceView === "portfolio" ? " nav-item--active" : ""}`}
             type="button"
@@ -1627,6 +1672,7 @@ export function ComparisonWorkbench({
             <span className="nav-icon">+</span>
             ETF Creator
           </button>
+          </>}
           <button
             className={`nav-item${workspaceView === "metrics" ? " nav-item--active" : ""}`}
             type="button"
@@ -1636,13 +1682,16 @@ export function ComparisonWorkbench({
             <span className="nav-icon">⌗</span>
             Metrics
           </button>
-          {aiAnalysisEnabled ? <button className={`nav-item${workspaceView === "ai" ? " nav-item--active" : ""}`} type="button" aria-pressed={workspaceView === "ai"} onClick={() => setWorkspaceView("ai")}><span className="nav-icon">✦</span>AI analysis</button> : null}
+          {owner ? <button className={`nav-item${workspaceView === "ai" ? " nav-item--active" : ""}`} type="button" aria-pressed={workspaceView === "ai"} onClick={() => setWorkspaceView("ai")}><span className="nav-icon">✦</span>AI analysis</button> : null}
         </nav>
         <div className="sidebar-card">
           <span className="live-pulse" />
           <strong>Official sources</strong>
           <p>Official holdings persisted locally and refreshed every 24 hours.</p>
         </div>
+        {siteMode === "web" && <div className="site-access-links">
+          {owner ? <><a href={publicOrigin}>Public website</a><a href="/cdn-cgi/access/logout">Sign out</a></> : <a href={ownerOrigin}>Owner sign in</a>}
+        </div>}
         <div className="sidebar-footer">
           <span>JL</span>
           <div>
@@ -1727,7 +1776,7 @@ export function ComparisonWorkbench({
             >
               Metrics
             </button>
-            {aiAnalysisEnabled ? <button type="button" className={workspaceView === "ai" ? "is-active" : ""} onClick={() => setWorkspaceView("ai")}>AI analysis</button> : null}
+            {owner ? <button type="button" className={workspaceView === "ai" ? "is-active" : ""} onClick={() => setWorkspaceView("ai")}>AI analysis</button> : null}
           </div>
           {workspaceView === "compare" ? (
             <div className="holdings-overview">
@@ -2168,25 +2217,29 @@ export function ComparisonWorkbench({
                 </section>
               ) : null}
             </div>
-          ) : workspaceView === "portfolio" ? (
+          ) : workspaceView === "portfolio" && owner ? (
             <PortfolioAnalytics
               catalog={availableCatalog}
+              publicationEnabled={siteMode === "web"}
               onCatalogChanged={refreshCatalog}
             />
-          ) : workspaceView === "creator" ? (
+          ) : workspaceView === "creator" && owner ? (
             <EtfCreator
               catalog={researchCatalog}
+              publicationEnabled={siteMode === "web"}
               onCatalogChanged={refreshCatalog}
             />
           ) : workspaceView === "metrics" ? (
             <MetricsOverview
+              key={resultRevision}
               catalog={researchCatalog}
               initialEtfIds={[leftEtfId, rightEtfId]}
             />
           ) : null}
 
-          {aiAnalysisEnabled && workspaceView === "ai" ? <AiAnalysisPanel catalog={availableCatalog} initialEtfId={leftEtfId} /> : null}
+          {owner && workspaceView === "ai" ? <AiAnalysisPanel catalog={availableCatalog} initialEtfId={leftEtfId} /> : null}
 
+          {siteMode === "web" && owner && (workspaceView === "compare" || workspaceView === "metrics") && <PublicationManager catalog={availableCatalog} onChanged={refreshCatalog} />}
           <footer className="disclaimer">
             <span>Weightings Analytics</span>
             Indicative data sourced from fund and index providers. Holdings may

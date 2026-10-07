@@ -8,6 +8,7 @@
 # local data and environment
 /.data/
 /backups/
+/docs/audit-projet-2026-10-05.md
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

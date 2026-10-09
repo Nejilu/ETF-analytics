@@ -1,4 +1,5 @@
 import type { PortfolioRecord } from "./portfolio";
+import type { HoldingsAnalysisPosition } from "./holdings-analysis";
 import type { UpcomingEarningsView } from "./upcoming-earnings";
 
 export const PORTFOLIO_EVENT_POSITIONS_LIMIT = 10;
@@ -28,6 +29,22 @@ export function selectPortfolioEventPositions(portfolio: PortfolioRecord, limit 
     : portfolio.items.filter((item) => item.kind === "security").map((item) => ({
         securityId: item.referenceId, ticker: item.ticker, name: item.name, weight: item.allocationWeight,
       }));
+  return selectEventPositions(positions, limit);
+}
+
+export function selectHoldingsEventPositions(
+  holdings: readonly Pick<HoldingsAnalysisPosition, "securityId" | "quoteSecurityId" | "quoteTicker" | "ticker" | "name" | "assetClass" | "isCash" | "publishedWeight">[],
+  limit = PORTFOLIO_EVENT_POSITIONS_LIMIT,
+): PortfolioEventPosition[] {
+  return selectEventPositions(holdings
+    .filter((position) => !position.isCash && position.assetClass.toLowerCase().includes("equity"))
+    .map((position) => ({
+      securityId: position.quoteSecurityId ?? position.securityId,
+      ticker: position.quoteTicker ?? position.ticker, name: position.name, weight: position.publishedWeight,
+    })), limit);
+}
+
+function selectEventPositions(positions: PortfolioEventPosition[], limit: number): PortfolioEventPosition[] {
   const byId = new Map<string, PortfolioEventPosition>();
   for (const position of positions) {
     if (!Number.isFinite(position.weight) || position.weight === 0) continue;

@@ -3,6 +3,7 @@
 import { HoldingsSourceWarning } from "./holdings-source-warning";
 import { MetricCard } from "./metric-card";
 import { PortfolioValuationPanel, formatPortfolioUsd } from "./portfolio-valuation-panel";
+import { PortfolioEvents } from "./portfolio-events";
 import { portfolioPositionValueUsd } from "@/domain/portfolio-valuation";
 
 import { useEffect, useRef, useMemo, useState, type ReactNode } from "react";
@@ -2041,7 +2042,12 @@ export function ComparisonWorkbench({
                               weightView={holdingsWeightView}
                             />
                           </section>
-                          <HoldingsOverviewTable analysis={holdingsDisplayAnalysis ?? analysis} weightView={holdingsWeightView} />
+                          <div className="holdings-detail-columns">
+                            <HoldingsOverviewTable analysis={holdingsDisplayAnalysis ?? analysis} weightView={holdingsWeightView} />
+                            <aside className="portfolio-events-sidebar" aria-label="Earnings calendar sidebar">
+                              <PortfolioEvents key={analysis.etf.id} holdings={analysis} />
+                            </aside>
+                          </div>
                         </>
                       ) : null}
                     </div>

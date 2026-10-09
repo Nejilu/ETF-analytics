@@ -1562,11 +1562,11 @@ export function PortfolioAnalytics({
         <section className="panel portfolio-positions-panel" aria-label="Owned portfolio positions and cash">
           <div className="panel-heading">
             <div><span className="eyebrow">Owned positions</span><h2>Positions and cash</h2></div>
-            <div className="portfolio-position-legend"><span className="is-etf">ETF</span><span className="is-stock">Stock</span><span className="info-chip">{items.length + cashPositions.length} lines</span></div>
+            <div className="portfolio-position-legend"><span className="is-etf">ETF</span><span className="is-stock">Stock</span><span className="is-short">Short</span><span className="info-chip">{items.length + cashPositions.length} lines</span></div>
           </div>
           <div className="portfolio-position-bubbles">
             {normalizedItems.map((item) => (
-              <article className={`portfolio-position-bubble portfolio-position-bubble--${item.kind}`} key={item.id}>
+              <article className={`portfolio-position-bubble portfolio-position-bubble--${item.kind}${(item.quantity ?? 0) < 0 ? " is-short" : ""}`} key={item.id}>
                 <div className="portfolio-position-bubble__heading"><strong title={item.name}>{item.ticker}</strong><span>{item.kind === "etf" ? "ETF" : "Stock"}{(item.quantity ?? 0) < 0 ? " · short" : ""}</span></div>
                 <span className="portfolio-position-bubble__name" title={item.name}>{item.name}</span>
                 <strong className="portfolio-position-bubble__value">{item.valueAvailable ? formatPortfolioTotal(item.currentValueUsd ?? 0, displayCurrency, displayRateToUsd) : "Unavailable"}</strong>

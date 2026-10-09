@@ -21,6 +21,7 @@ import "../src/domain/processors/derive-estimate-metrics.test";
 import "../src/domain/metrics-overview-request.test";
 import "../src/domain/metrics-cache.test";
 import "../src/domain/upcoming-earnings.test";
+import "../src/domain/portfolio-events.test";
 import "../src/domain/provider-negative-cache.test";
 import "../src/domain/async-utils.test";
 import "../src/domain/portfolio-errors.test";

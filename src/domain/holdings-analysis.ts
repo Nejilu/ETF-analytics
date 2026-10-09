@@ -20,6 +20,8 @@ export type DistortionPositionStatus =
 
 export interface HoldingsAnalysisPosition {
   securityId: string;
+  quoteSecurityId?: string;
+  quoteTicker?: string;
   ticker: string;
   name: string;
   sector: string;

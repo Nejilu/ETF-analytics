@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { PortfolioAnalysis, PortfolioRecord } from "./portfolio";
-import { orderEarningsEvents, selectPortfolioEventPositions, type SecurityEarningsEvent } from "./portfolio-events";
+import { orderEarningsEvents, selectHoldingsEventPositions, selectPortfolioEventPositions, type SecurityEarningsEvent } from "./portfolio-events";
 
 const portfolio: PortfolioRecord = { id: "test", name: "Test", baseCurrency: "USD", updatedAt: "2026-10-09", items: [], cashPositions: [], analysis: null };
 const analysis: PortfolioAnalysis = {
@@ -55,4 +55,26 @@ test("events are chronological, with unavailable dates last and stable ordering 
   const input = [event("Z", "2026-11-10"), event("NONE", null), event("B", "2026-10-20"), event("A", "2026-10-20")];
   assert.deepEqual(orderEarningsEvents(input).map((row) => row.ticker), ["A", "B", "Z", "NONE"]);
   assert.equal(input[0].ticker, "Z");
+});
+
+test("holdings calendar ranks published equity exposure, combines duplicates and excludes cash, bonds and zero weights", () => {
+  const holding = (securityId: string, publishedWeight: number, assetClass = "Equity", isCash = false) => ({
+    securityId, ticker: securityId, name: securityId, publishedWeight, assetClass, isCash,
+  });
+  const holdings = [
+    holding("LONG", 15), holding("LONG", 10), holding("SHORT", -20),
+    holding("CASH", 50, "Cash", true), holding("CASH_EQUITY", 60, "Equity", true),
+    holding("BOND", 80, "Fixed Income"), holding("UNHELD", 0), holding("INVALID", NaN),
+    ...Array.from({ length: 32 }, (_, index) => holding(`S${index}`, (index + 1) / 10)),
+  ];
+  const original = structuredClone(holdings);
+  const top10 = selectHoldingsEventPositions(holdings);
+  assert.equal(top10.length, 10);
+  assert.deepEqual(top10.slice(0, 2).map(({ securityId, weight }) => ({ securityId, weight })), [
+    { securityId: "LONG", weight: 25 }, { securityId: "SHORT", weight: -20 },
+  ]);
+  assert.equal(top10[2].securityId, "S31");
+  assert.equal(selectHoldingsEventPositions(holdings, 30).length, 30);
+  assert.equal(selectHoldingsEventPositions(holdings, 100).length, 30);
+  assert.deepEqual(holdings, original);
 });

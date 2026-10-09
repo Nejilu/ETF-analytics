@@ -6,6 +6,7 @@ import { holdingsCashDisplayPositions } from "../holdings-cash-display";
 import { analyzeHoldings } from "./analyze-holdings";
 import { calculateHoldingsDistortion } from "./calculate-holdings-distortion";
 import { portfolioHoldingsValuation, portfolioPositionValueUsd } from "../portfolio-valuation";
+import { selectHoldingsEventPositions } from "../portfolio-events";
 
 function snapshot(
   id: string,
@@ -53,6 +54,22 @@ function holding(
     weight,
   };
 }
+
+test("grouped holdings retain the largest source listing for the earnings calendar", () => {
+  const target = snapshot("target", "TARGET", [
+    holding("alphabet-c", "GOOG", 30), holding("alphabet-a", "GOOGL", 45), holding("other", "OTHER", 25),
+  ]);
+  const result = analyzeHoldings(target, target);
+  const alphabet = result.positions.find((position) => position.securityId === "economic:alphabet");
+  assert.equal(alphabet?.publishedWeight, 75);
+  assert.equal(alphabet?.quoteSecurityId, "alphabet-a");
+  assert.equal(alphabet?.quoteTicker, "GOOGL");
+  assert.deepEqual(selectHoldingsEventPositions(result.positions)[0], {
+    securityId: "alphabet-a", ticker: "GOOGL", name: "ALPHABET INC", weight: 75,
+  });
+  const missingReference = analyzeHoldings(target, snapshot("acwi", "ACWI", [holding("other", "OTHER", 100)]));
+  assert.equal(selectHoldingsEventPositions(missingReference.positions)[0].securityId, "alphabet-a");
+});
 
 test("portfolio analysis keeps NAV amounts, shorts and leverage across weight and cash displays", () => {
   const target = snapshot("portfolio", "PORT", [

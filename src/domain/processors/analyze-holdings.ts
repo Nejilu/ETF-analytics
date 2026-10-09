@@ -6,7 +6,7 @@ import type {
   HoldingsAnalysisPosition,
   HoldingsAnalysisResult,
 } from "@/domain/holdings-analysis";
-import { mergeEquivalentHoldings } from "@/domain/security-equivalence";
+import { economicSecurityIdentity, mergeEquivalentHoldings } from "@/domain/security-equivalence";
 
 import { normalizeHoldingWeights } from "./normalize-holding-weights";
 import { calculateHoldingsDistortion } from "./calculate-holdings-distortion";
@@ -45,6 +45,16 @@ export function analyzeHoldings(
   acwiSnapshot: HoldingsSnapshot,
 ): HoldingsAnalysisResult {
   const targetHoldings = normalizedHoldings(targetSnapshot);
+  const quoteReferences = new Map<string, Holding>();
+  for (const holding of targetSnapshot.holdings) {
+    const identity = economicSecurityIdentity(holding);
+    if (identity.securityId === holding.securityId) continue;
+    const existing = quoteReferences.get(identity.securityId);
+    if (!existing || Math.abs(holding.weight) > Math.abs(existing.weight)
+      || (Math.abs(holding.weight) === Math.abs(existing.weight) && holding.securityId.localeCompare(existing.securityId) < 0)) {
+      quoteReferences.set(identity.securityId, holding);
+    }
+  }
   const acwiHoldings = normalizedHoldings(acwiSnapshot).filter(isEquity);
   const targetEquities = targetHoldings.filter(isEquity);
   const cashHoldings = targetHoldings.filter(isCashHolding);
@@ -83,12 +93,15 @@ export function analyzeHoldings(
 
   const positions: HoldingsAnalysisPosition[] = targetHoldings
     .map((holding) => {
+      const quote = quoteReferences.get(holding.securityId);
+      const quoteIdentity = quote ? { quoteSecurityId: quote.securityId, quoteTicker: quote.ticker } : {};
       const equity = isEquity(holding);
       const cash = isCashHolding(holding);
       const reference = acwiBySecurity.get(holding.securityId);
       if (!equity || !reference || !canCalculate) {
         return {
           securityId: holding.securityId,
+          ...quoteIdentity,
           ticker: holding.ticker,
           name: holding.name,
           sector: holding.sector,
@@ -114,6 +127,7 @@ export function analyzeHoldings(
       const weightDelta = actualWeight - counterfactualWeight;
       return {
         securityId: holding.securityId,
+        ...quoteIdentity,
         ticker: holding.ticker,
         name: holding.name,
         sector: holding.sector,

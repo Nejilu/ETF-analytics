@@ -21,7 +21,7 @@ export function PortfolioValuationPanel({
         </div>
         <span className="info-chip">Actual holdings</span>
       </div>
-      <details open>
+      <details key={ticker}>
         <summary>Positions, amounts and shares · {valuation.items.length + valuation.cash.length} lines</summary>
         <p className="holdings-method-copy">Shares below are the instruments held. The analysis table shows underlying exposure through ETF sleeves; its dollar amounts always use net asset value, even when weights exclude cash.</p>
         <div className="table-scroll">

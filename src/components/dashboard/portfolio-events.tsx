@@ -2,11 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { PortfolioRecord } from "@/domain/portfolio";
-import { orderEarningsEvents, PORTFOLIO_EVENT_POSITIONS_LIMIT, PORTFOLIO_EVENT_POSITIONS_MAX, selectPortfolioEventPositions, type SecurityEarningsEvent } from "@/domain/portfolio-events";
+import type { HoldingsAnalysisResult } from "@/domain/holdings-analysis";
+import { orderEarningsEvents, PORTFOLIO_EVENT_POSITIONS_LIMIT, PORTFOLIO_EVENT_POSITIONS_MAX, selectHoldingsEventPositions, selectPortfolioEventPositions, type SecurityEarningsEvent } from "@/domain/portfolio-events";
 
-export function PortfolioEvents({ portfolio }: { portfolio: PortfolioRecord }) {
+export function PortfolioEvents(props: { portfolio: PortfolioRecord } | { holdings: HoldingsAnalysisResult }) {
+  const portfolio = "portfolio" in props ? props.portfolio : undefined;
+  const holdings = "holdings" in props ? props.holdings : undefined;
   const [positionsLimit, setPositionsLimit] = useState(PORTFOLIO_EVENT_POSITIONS_LIMIT);
-  const positions = useMemo(() => selectPortfolioEventPositions(portfolio, positionsLimit), [portfolio, positionsLimit]);
+  const positions = useMemo(() => portfolio
+    ? selectPortfolioEventPositions(portfolio, positionsLimit)
+    : selectHoldingsEventPositions(holdings!.positions, positionsLimit), [portfolio, holdings, positionsLimit]);
+  const weightLabel = portfolio || holdings?.portfolioValuation ? "of NAV" : "fund weight";
   const idsKey = JSON.stringify(positions.map((position) => position.securityId));
   const [attempt, setAttempt] = useState(0);
   const [expanded, setExpanded] = useState(false);
@@ -41,7 +47,7 @@ export function PortfolioEvents({ portfolio }: { portfolio: PortfolioRecord }) {
   const missingDates = positions.length - events.length;
 
   return (
-    <section className="panel portfolio-events-panel" aria-label="Portfolio events" aria-busy={loading}>
+    <section className="panel portfolio-events-panel" aria-label={holdings ? `${holdings.etf.ticker} earnings calendar` : "Portfolio events"} aria-busy={loading}>
       <div className="panel-heading">
         <div><span className="eyebrow">Upcoming events</span><h2>Earnings calendar</h2></div>
         <select
@@ -55,7 +61,7 @@ export function PortfolioEvents({ portfolio }: { portfolio: PortfolioRecord }) {
           <option value={PORTFOLIO_EVENT_POSITIONS_MAX}>Top 30</option>
         </select>
       </div>
-      <p className="portfolio-events-intro">Main positions, including stocks held through ETFs.</p>
+      <p className="portfolio-events-intro">{holdings ? `Main equity positions in ${holdings.etf.ticker}.` : "Main positions, including stocks held through ETFs."}</p>
       {loading ? <p className="portfolio-events-message" role="status"><span className="spinner" /> Loading upcoming earnings…</p>
         : error ? <div className="portfolio-events-message" role="status"><span>{error}</span><button className="secondary-button" type="button" onClick={() => setAttempt((value) => value + 1)}>Retry</button></div>
         : visibleEvents.length > 0 ? (
@@ -72,7 +78,7 @@ export function PortfolioEvents({ portfolio }: { portfolio: PortfolioRecord }) {
                   <div className="portfolio-event__identity">
                     <strong>{position?.ticker ?? event.ticker}</strong>
                     <span title={position?.name ?? event.name}>{position?.name ?? event.name}</span>
-                    <small>{position?.weight.toFixed(2)}% of NAV{event.sourceStatus === "stale" ? " · stale date" : ""}</small>
+                    <small>{position?.weight.toFixed(2)}% {weightLabel}{event.sourceStatus === "stale" ? " · stale date" : ""}</small>
                   </div>
                 </li>
               );

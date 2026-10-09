@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 
 import type { EtfCreatorCriteria } from "@/domain/etf-creator";
+import { creatorCriteriaCompositionModel } from "@/domain/etf-creator";
 import type { EtfShareClass, Holding, HoldingsSnapshot } from "@/domain/etf";
 
 import { getDb } from "../client";
@@ -52,7 +53,7 @@ export function saveCreatedEtf(input: SaveCreatedEtfInput): EtfShareClass {
         provider: "Weightings Analytics",
         region: "Custom ETF universes",
         description:
-          "User-created selections whose free-float weights are recalculated from a supported ETF source on read.",
+          "User-created selections with free-float or equal base weights and optional custom multipliers, recalculated from a supported ETF source on read.",
       })
       .onConflictDoUpdate({
         target: benchmarks.id,
@@ -60,7 +61,7 @@ export function saveCreatedEtf(input: SaveCreatedEtfInput): EtfShareClass {
           name: "Custom ETFs",
           region: "Custom ETF universes",
           description:
-            "User-created selections whose free-float weights are recalculated from a supported ETF source on read.",
+            "User-created selections with free-float or equal base weights and optional custom multipliers, recalculated from a supported ETF source on read.",
           updatedAt: sql`CURRENT_TIMESTAMP`,
         },
       })
@@ -90,7 +91,7 @@ export function saveCreatedEtf(input: SaveCreatedEtfInput): EtfShareClass {
         description: input.description,
         active: true,
         metadataJson: {
-          compositionModel: "dynamic-source-free-float",
+          compositionModel: creatorCriteriaCompositionModel(input.criteria),
           sourceEtfId: input.source.etf.id,
           sourceTicker: input.source.etf.ticker,
           sourceAsOf: input.source.asOf,

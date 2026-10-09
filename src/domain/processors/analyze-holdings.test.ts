@@ -4,6 +4,7 @@ import test from "node:test";
 import type { EtfShareClass, Holding, HoldingsSnapshot } from "../etf";
 import { holdingsCashDisplayPositions } from "../holdings-cash-display";
 import { analyzeHoldings } from "./analyze-holdings";
+import { calculateHoldingsDistortion } from "./calculate-holdings-distortion";
 import { portfolioHoldingsValuation, portfolioPositionValueUsd } from "../portfolio-valuation";
 
 function snapshot(
@@ -95,9 +96,90 @@ test("returns zero when the ETF matches its ACWI-implied free-float weights", ()
   const result = analyzeHoldings(acwi, acwi);
 
   assert.equal(result.distortion.score, 0);
+  assert.equal(result.marketCoverage.score, 0);
   assert.equal(result.distortion.coverageWeight, 100);
   assert.equal(result.distortion.coverageStatus, "complete");
   assert.equal(result.positions[0].distortionContribution, 0);
+});
+
+test("defaults to the largest 30 equities and excludes small-position artifacts", () => {
+  const main = Array.from({ length: 30 }, (_, i) => holding(`MAIN:${i}`, `MAIN${i}`, 3));
+  const tail = Array.from({ length: 20 }, (_, i) => holding(`TAIL:${i}`, `TAIL${i}`, 0.5));
+  const target = snapshot("target", "TARGET", [...tail, ...main]);
+  const acwi = snapshot("acwi-us", "ACWI", [...main.map((h) => ({ ...h, weight: 1 })), ...tail.map((h) => ({ ...h, weight: 3.5 }))]);
+  const result = analyzeHoldings(target, acwi);
+  assert.equal(result.distortion.mode, "top-holdings");
+  assert.equal(result.distortion.topCount, 30);
+  assert.equal(result.distortion.eligibleHoldings, 30);
+  assert.equal(result.distortion.selectedWeight, 90);
+  assert.equal(result.distortion.score, 0);
+  assert.equal(result.allHoldingsDistortion.score, 60);
+  assert.equal(result.marketCoverage.score, 60);
+  const fullTop = calculateHoldingsDistortion(result.positions, result.distortionReferencePositions, result.distortion, "top-holdings", 50);
+  assert.equal(fullTop.distortion.score, result.allHoldingsDistortion.score);
+  assert.equal(fullTop.positions.length, 50);
+});
+
+test("recalculates a top subset against only its ACWI weights and leaves canonical holdings unchanged", () => {
+  const result = analyzeHoldings(snapshot("target", "TARGET", [holding("C", "C", 10), holding("B", "B", 30), holding("A", "A", 60)]), snapshot("acwi-us", "ACWI", [holding("A", "A", 20), holding("B", "B", 20), holding("C", "C", 60)]));
+  const original = structuredClone(result.positions);
+  const top = calculateHoldingsDistortion(result.positions, result.distortionReferencePositions, result.distortion, "top-holdings", 2);
+  assert.equal(top.distortion.topCount, 2);
+  assert.equal(top.distortion.selectedWeight, 90);
+  assert.equal(top.distortion.score, 16.666666);
+  assert.equal(top.positions.find((p) => p.ticker === "A")?.actualWeight, 66.666667);
+  assert.equal(top.positions.find((p) => p.ticker === "A")?.counterfactualWeight, 50);
+  assert.deepEqual(result.positions, original);
+  assert.equal(calculateHoldingsDistortion(result.positions, result.distortionReferencePositions, result.distortion, "top-holdings", 100).distortion.topCount, 3);
+});
+
+test("market coverage retains the full ACWI even when the portfolio holds only one constituent", () => {
+  const result = analyzeHoldings(snapshot("target", "TARGET", [holding("A", "A", 100)]), snapshot("acwi-us", "ACWI", [holding("A", "A", 20), holding("B", "B", 30), holding("C", "C", 50)]));
+  assert.equal(result.distortion.score, 0);
+  assert.equal(result.allHoldingsDistortion.score, 0);
+  assert.equal(result.marketCoverage.score, 80);
+  const market = calculateHoldingsDistortion(result.positions, result.distortionReferencePositions, result.distortion, "market-coverage");
+  assert.equal(market.distortion.referenceHoldings, 3);
+  assert.equal(market.positions.reduce((sum, p) => sum + (p.distortionContribution ?? 0), 0), market.distortion.score);
+  assert.equal(market.positions.find((p) => p.ticker === "B")?.distortionStatus, "not-held");
+  assert.equal(market.positions.find((p) => p.ticker === "B")?.actualWeight, 0);
+  assert.equal(market.positions.find((p) => p.ticker === "B")?.counterfactualWeight, 30);
+});
+
+test("market coverage includes equities outside ACWI, including a completely disjoint portfolio", () => {
+  const acwi = snapshot("acwi-us", "ACWI", [holding("A", "A", 50), holding("B", "B", 50)]);
+  const result = analyzeHoldings(snapshot("target", "TARGET", [holding("A", "A", 50), holding("OUTSIDE", "OUT", 50)]), acwi);
+  assert.equal(result.distortion.score, 0);
+  assert.equal(result.marketCoverage.score, 50);
+  const market = calculateHoldingsDistortion(result.positions, result.distortionReferencePositions, result.distortion, "market-coverage");
+  assert.equal(market.positions.find((p) => p.ticker === "OUT")?.counterfactualWeight, 0);
+  assert.equal(market.positions.find((p) => p.ticker === "OUT")?.distortionContribution, 25);
+  const disjoint = analyzeHoldings(snapshot("target", "TARGET", [holding("OUTSIDE", "OUT", 100)]), acwi);
+  assert.equal(disjoint.distortion.score, null);
+  assert.equal(disjoint.allHoldingsDistortion.score, null);
+  assert.equal(disjoint.marketCoverage.score, 100);
+});
+
+test("top selection precedes ACWI matching and excludes cash and nonpositive equity exposures", () => {
+  const target = snapshot("portfolio", "PORT", [holding("USD", "USD", 100, "Cash"), holding("OUT", "OUT", 60), holding("A", "A", 30), holding("B", "B", 10), holding("SHORT", "SHORT", -100)]);
+  target.etf.fundType = "portfolio";
+  const result = analyzeHoldings(target, snapshot("acwi-us", "ACWI", [holding("A", "A", 50), holding("B", "B", 50)]));
+  const top = calculateHoldingsDistortion(result.positions, result.distortionReferencePositions, result.distortion, "top-holdings", 2);
+  assert.deepEqual(top.positions.map((p) => p.ticker).sort(), ["A", "OUT"]);
+  assert.equal(top.distortion.coveredHoldings, 1);
+  assert.equal(top.distortion.missingHoldings, 1);
+  assert.equal(top.distortion.coverageWeight, 33.333333);
+  assert.equal(top.distortion.score, 0);
+});
+
+test("empty equity or ACWI universes do not produce a score", () => {
+  const cash = snapshot("target", "TARGET", [holding("USD", "USD", 100, "Cash")]);
+  const acwi = snapshot("acwi-us", "ACWI", [holding("A", "A", 100)]);
+  const result = analyzeHoldings(cash, acwi);
+  assert.equal(result.distortion.topCount, 0);
+  assert.equal(result.distortion.score, null);
+  assert.equal(result.marketCoverage.score, null);
+  assert.equal(analyzeHoldings(acwi, cash).marketCoverage.score, null);
 });
 
 test("matches the NDX distortion formula and reconciles position contributions", () => {

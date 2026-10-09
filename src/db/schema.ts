@@ -202,6 +202,28 @@ export const portfolios = sqliteTable("portfolios", {
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const portfolioHistorySettings = sqliteTable("portfolio_history_settings", {
+  portfolioId: text("portfolio_id").primaryKey().references(() => portfolios.id, { onDelete: "cascade" }),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  lastAttemptAt: text("last_attempt_at"),
+  lastError: text("last_error"),
+});
+
+export const portfolioValueSnapshots = sqliteTable("portfolio_value_snapshots", {
+  portfolioId: text("portfolio_id").notNull().references(() => portfolios.id, { onDelete: "cascade" }),
+  date: text("date").notNull(),
+  capturedAt: text("captured_at").notNull(),
+  valueUsd: real("value_usd").notNull(),
+  valueEur: real("value_eur").notNull(),
+  eurToUsd: real("eur_to_usd").notNull(),
+  quotesAsOf: text("quotes_as_of").notNull(),
+  fxAsOf: text("fx_as_of").notNull(),
+  reason: text("reason", { enum: ["initial", "scheduled", "catchup"] }).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.portfolioId, table.date] }),
+  check("portfolio_snapshot_positive_values", sql`${table.valueUsd} > 0 AND ${table.valueEur} > 0 AND ${table.eurToUsd} > 0`),
+]);
+
 export const portfolioItems = sqliteTable(
   "portfolio_items",
   {

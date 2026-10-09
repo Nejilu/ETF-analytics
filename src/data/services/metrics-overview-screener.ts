@@ -40,12 +40,14 @@ import {
   type SecurityMetricsInput,
 } from "@/db/repositories/metrics-repository";
 import { databasePath } from "@/db/client";
+import { saveUpcomingEarningsBatch } from "@/db/repositories/upcoming-earnings-repository";
 
 export interface PrepareScreenerRefreshInput {
   holdings: readonly Holding[];
   providerSymbols: ReadonlyMap<string, ProviderSymbolRecord>;
   cachedMetrics: ReadonlyMap<string, CachedSecurityMetrics>;
   ttlSeconds: number;
+  additionalRefreshSecurityIds?: ReadonlySet<string>;
 }
 
 /**
@@ -133,6 +135,7 @@ export function prepareScreenerRefresh(
     });
     return sourceMetricsAreFresh ? [] : [holding.securityId];
   }));
+  for (const securityId of input.additionalRefreshSecurityIds ?? []) needsRefresh.add(securityId);
   for (const holding of input.holdings) {
     const providerRecord = input.providerSymbols.get(holding.securityId);
     const persisted = resolvedProviderSymbol(providerRecord);
@@ -322,6 +325,7 @@ export function selectBestScreenerMatch(
 }
 
 export interface RefreshScreenerMetricsInput {
+  includeUpcomingEarnings?: boolean;
   holdings: readonly Holding[];
   needsRefresh: ReadonlySet<string>;
   candidatesBySecurity: ReadonlyMap<string, readonly string[]>;
@@ -431,7 +435,9 @@ export async function refreshScreenerMetrics(
 
   try {
     const cachedSecurityIdsBeforeRefresh = new Set(cachedMetrics.keys());
-    const providerResult = await fetchTradingViewMetrics([...input.requestedSymbols]);
+    const providerResult = await fetchTradingViewMetrics([...input.requestedSymbols], fetch, {
+      includeUpcomingEarnings: input.includeUpcomingEarnings,
+    });
     const observations = providerResult.observations;
     const bySymbol = new Map(observations.map((observation) => [observation.symbol, observation]));
     const failedSymbols = new Set(providerResult.failedSymbols);
@@ -440,6 +446,7 @@ export async function refreshScreenerMetrics(
     const capturedAtMs = Date.parse(capturedAt);
     const providerSymbolWrites: ProviderSymbolInput[] = [];
     const metricWrites: SecurityMetricsInput[] = [];
+    const earningsWrites: Parameters<typeof saveUpcomingEarningsBatch>[0] = [];
     const negativeCacheWrites: ProviderNegativeCacheEntry[] = [];
     const negativeCacheDeletes: ProviderNegativeCacheEntry[] = [];
     let incompleteSourceMetrics = false;
@@ -544,6 +551,11 @@ export async function refreshScreenerMetrics(
 
       const match = selectedMatch;
       const observation = match.observation;
+      if (observation.upcomingEarnings) {
+        earningsWrites.push({ securityId: holding.securityId, observation: {
+          providerSymbol: observation.symbol, ...observation.upcomingEarnings,
+        } });
+      }
       const provenance = selectedProvenance ?? "cross_exchange";
       const confidence = mappingConfidence(provenance, match.score);
       const selectedCandidate = candidateDetailsBySymbol.get(observation.symbol);
@@ -624,6 +636,7 @@ export async function refreshScreenerMetrics(
 
     saveProviderSymbolsBatch(providerSymbolWrites);
     saveSecurityMetricsBatch(metricWrites, capturedAt);
+    saveUpcomingEarningsBatch(earningsWrites, capturedAt);
     saveProviderNegativeCacheBatch(negativeCacheWrites);
     deleteProviderNegativeCacheBatch(negativeCacheDeletes);
     // A Screener response can resolve mappings while exposing no numeric

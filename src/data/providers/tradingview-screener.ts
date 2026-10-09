@@ -1,7 +1,9 @@
 import { SOURCE_METRIC_DEFINITIONS, type MetricKey } from "@/domain/metrics";
+import { parseUpcomingEarningsDate } from "@/domain/upcoming-earnings";
 
 const TRADINGVIEW_SCAN_URL = "https://scanner.tradingview.com/global/scan";
 const IDENTITY_COLUMNS = ["name", "description", "sector"] as const;
+const EARNINGS_COLUMNS = ["earnings_release_next_date", "timezone"] as const;
 const MISSING_RETRY_BATCH_SIZE = 25;
 const DEFAULT_MISSING_RETRY_LIMIT = 100;
 
@@ -11,6 +13,7 @@ export interface TradingViewSecurityMetrics {
   description: string | null;
   sector: string | null;
   values: Partial<Record<MetricKey, number>>;
+  upcomingEarnings?: { reportDate: string | null; exchangeTimezone: string | null };
 }
 
 export interface TradingViewMetricsResult {
@@ -50,7 +53,7 @@ function finiteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-export function parseTradingViewScanResponse(payload: unknown): TradingViewSecurityMetrics[] {
+export function parseTradingViewScanResponse(payload: unknown, includeUpcomingEarnings = false): TradingViewSecurityMetrics[] {
   if (!payload || typeof payload !== "object") throw new Error("TradingView returned an invalid response.");
   const response = payload as ScanResponse;
   if (!Array.isArray(response.data)) {
@@ -71,11 +74,15 @@ export function parseTradingViewScanResponse(payload: unknown): TradingViewSecur
       description: typeof data[1] === "string" ? data[1] : null,
       sector: typeof data[2] === "string" ? data[2] : null,
       values,
+      ...(includeUpcomingEarnings ? { upcomingEarnings: parseUpcomingEarningsDate(
+        data[IDENTITY_COLUMNS.length + SOURCE_METRIC_DEFINITIONS.length],
+        data[IDENTITY_COLUMNS.length + SOURCE_METRIC_DEFINITIONS.length + 1],
+      ) } : {}),
     }];
   });
 }
 
-async function scanBatch(symbols: string[], fetcher: typeof fetch): Promise<TradingViewSecurityMetrics[]> {
+async function scanBatch(symbols: string[], fetcher: typeof fetch, includeUpcomingEarnings: boolean): Promise<TradingViewSecurityMetrics[]> {
   const response = await fetcher(TRADINGVIEW_SCAN_URL, {
     method: "POST",
     headers: {
@@ -88,6 +95,7 @@ async function scanBatch(symbols: string[], fetcher: typeof fetch): Promise<Trad
       columns: [
         ...IDENTITY_COLUMNS,
         ...SOURCE_METRIC_DEFINITIONS.map((definition) => definition.tradingViewColumn),
+        ...(includeUpcomingEarnings ? EARNINGS_COLUMNS : []),
       ],
     }),
     cache: "no-store",
@@ -96,12 +104,13 @@ async function scanBatch(symbols: string[], fetcher: typeof fetch): Promise<Trad
   if (!response.ok) {
     throw new Error(`TradingView Screener returned HTTP ${response.status}.`);
   }
-  return parseTradingViewScanResponse(await response.json());
+  return parseTradingViewScanResponse(await response.json(), includeUpcomingEarnings);
 }
 
 export async function fetchTradingViewMetrics(
   symbols: string[],
   fetcher: typeof fetch = fetch,
+  options: { includeUpcomingEarnings?: boolean } = {},
 ): Promise<TradingViewMetricsResult> {
   const requestedOrder = [...new Set(symbols)];
   const uniqueSymbols = requestedOrder.slice().sort();
@@ -120,7 +129,7 @@ export async function fetchTradingViewMetrics(
       const index = next;
       next += 1;
       try {
-        const batchOutput = await scanBatch(groups[index], fetcher);
+        const batchOutput = await scanBatch(groups[index], fetcher, options.includeUpcomingEarnings ?? false);
         if (batchOutput.length === 0) {
           failedGroups.push(groups[index]);
           errors.push(new Error("TradingView Screener batch returned no observations."));
@@ -148,7 +157,7 @@ export async function fetchTradingViewMetrics(
         nextRetry += 1;
         if (index >= retryGroups.length) return;
         try {
-          const retryOutput = await scanBatch(retryGroups[index], fetcher);
+          const retryOutput = await scanBatch(retryGroups[index], fetcher, options.includeUpcomingEarnings ?? false);
           if (retryOutput.length === 0) {
             failedGroups.push(retryGroups[index]);
             errors.push(new Error("TradingView Screener retry returned no observations."));

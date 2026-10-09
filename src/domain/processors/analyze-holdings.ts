@@ -9,6 +9,7 @@ import type {
 import { mergeEquivalentHoldings } from "@/domain/security-equivalence";
 
 import { normalizeHoldingWeights } from "./normalize-holding-weights";
+import { calculateHoldingsDistortion } from "./calculate-holdings-distortion";
 
 const round = (value: number, decimals = 6) =>
   Number(value.toFixed(decimals));
@@ -155,6 +156,17 @@ export function analyzeHoldings(
       )
     : null;
 
+  const reference = {
+    referenceEtfId: acwiSnapshot.etf.id,
+    referenceTicker: acwiSnapshot.etf.ticker,
+    referenceAsOf: acwiSnapshot.asOf,
+  };
+  const distortionReferencePositions = acwiHoldings.map(({ securityId, ticker, name, sector, assetClass, country, weight }) =>
+    ({ securityId, ticker, name, sector, assetClass, country, weight }),
+  );
+  const distortion = calculateHoldingsDistortion(positions, distortionReferencePositions, reference).distortion;
+  const marketCoverage = calculateHoldingsDistortion(positions, distortionReferencePositions, reference, "market-coverage").distortion;
+
   return {
     etf: targetSnapshot.etf,
     ...(targetSnapshot.etf.fundType === "portfolio" && targetSnapshot.portfolioValuation
@@ -190,7 +202,14 @@ export function analyzeHoldings(
     sectors: [...sectors.entries()]
       .map(([sector, weight]) => ({ sector, weight: round(weight) }))
       .sort((left, right) => right.weight - left.weight),
-    distortion: {
+    distortion,
+    marketCoverage,
+    distortionReferencePositions,
+    allHoldingsDistortion: {
+      mode: "all-holdings",
+      topCount: null,
+      selectedWeight: round(targetEquityWeight),
+      referenceHoldings: coveredEquities.length,
       score,
       coverageWeight: round(coverageWeight),
       coverageStatus: coverageStatus(coverageWeight),

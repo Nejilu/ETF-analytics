@@ -5,7 +5,9 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { EtfShareClass } from "@/domain/etf";
 import type { EtfCreatorCriteria } from "@/domain/etf-creator";
 import {
+  creatorCriteriaCompositionModel,
   dynamicCreatorDescription,
+  hasCreatorOverlapMultipliers,
   type CreatorSelectedSecurity,
 } from "@/domain/etf-creator";
 import type { Holding } from "@/domain/etf";
@@ -166,6 +168,31 @@ export function findDynamicCustomEtfDefinition(
   };
 }
 
+export function customEtfDependsOn(referenceId: string, targetId: string): boolean {
+  const pending = [referenceId];
+  const visited = new Set<string>();
+  while (pending.length > 0) {
+    const id = pending.pop()!;
+    if (id === targetId) return true;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    const definition = findDynamicCustomEtfDefinition(id);
+    if (!definition) continue;
+    if (definition.criteria?.subsets) {
+      for (const subset of definition.criteria.subsets) {
+        pending.push(subset.sourceEtfId);
+        if (hasCreatorOverlapMultipliers(subset.criteria.weightMultipliers) && subset.criteria.overlapEtfId) pending.push(subset.criteria.overlapEtfId);
+      }
+      continue;
+    }
+    pending.push(definition.sourceEtfId);
+    if (hasCreatorOverlapMultipliers(definition.criteria?.weightMultipliers) && definition.criteria?.overlapEtfId) {
+      pending.push(definition.criteria.overlapEtfId);
+    }
+  }
+  return false;
+}
+
 export function migrateCustomEtfDefinitions(): number {
   const db = getDb();
   const customRows = db
@@ -183,7 +210,7 @@ export function migrateCustomEtfDefinitions(): number {
     dynamicDefinitionIds.add(row.id);
     const metadata = metadataObject(row.metadataJson);
     const alreadyDynamic =
-      metadata.compositionModel === "dynamic-source-free-float" &&
+      metadata.compositionModel === creatorCriteriaCompositionModel(definition.criteria) &&
       selectedSecuritiesFromMetadata(metadata.selectedSecurities).length > 0;
     if (alreadyDynamic) return [];
     return [{ row, definition, metadata }];
@@ -230,10 +257,13 @@ export function migrateCustomEtfDefinitions(): number {
             definition.editableDescription,
             definition.selectedSecurities.length,
             definition.sourceTicker,
+            definition.criteria?.weightingMode,
+            definition.criteria?.weightMultipliers,
+            definition.criteria?.subsets,
           ),
           metadataJson: {
             ...retainedMetadata,
-            compositionModel: "dynamic-source-free-float",
+            compositionModel: creatorCriteriaCompositionModel(definition.criteria),
             sourceEtfId: definition.sourceEtfId,
             sourceTicker: definition.sourceTicker,
             selectedCount: definition.selectedSecurities.length,
@@ -391,7 +421,7 @@ export function replaceCustomEtfRecord(
         ...(input.visibility === undefined ? {} : { visibility: input.visibility }),
         description: input.description,
         metadataJson: {
-          compositionModel: "dynamic-source-free-float",
+          compositionModel: creatorCriteriaCompositionModel(input.criteria),
           sourceEtfId: input.sourceEtfId,
           sourceTicker: input.sourceTicker,
           sourceAsOf: input.sourceAsOf,
@@ -434,11 +464,11 @@ export function replacePortfolioEtfRecord(
       .where(eq(portfolioCashPositions.portfolioId, input.portfolioId))
       .run();
 
-    if (input.items.length > 0) {
+    for (let offset = 0; offset < input.items.length; offset += 500) {
       transaction
         .insert(portfolioItems)
         .values(
-          input.items.map((item) => ({
+          input.items.slice(offset, offset + 500).map((item) => ({
             id: randomUUID(),
             portfolioId: input.portfolioId,
             assetType: item.kind,

@@ -4,6 +4,27 @@ import test from "node:test";
 import { SOURCE_METRIC_DEFINITIONS } from "@/domain/metrics";
 import { fetchTradingViewMetrics, parseTradingViewScanResponse } from "./tradingview-screener";
 
+test("requests the earnings calendar alongside fundamentals only when opted in", async () => {
+  for (const includeUpcomingEarnings of [false, true]) {
+    let calls = 0;
+    const result = await fetchTradingViewMetrics(["NASDAQ:MSFT"], async (_url, init) => {
+      calls++;
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.columns.includes("earnings_release_next_date"), includeUpcomingEarnings);
+      assert.equal(body.columns.includes("timezone"), includeUpcomingEarnings);
+      return Response.json({ data: [{ s: "NASDAQ:MSFT", d: ["MSFT", "Microsoft", "Technology",
+        ...SOURCE_METRIC_DEFINITIONS.map(() => 10),
+        ...(includeUpcomingEarnings ? [1793102400, "America/New_York"] : []),
+      ] }] });
+    }, { includeUpcomingEarnings });
+    assert.equal(calls, 1);
+    assert.equal(result.observations[0].values.price_earnings_ttm, 10);
+    assert.equal(result.observations[0].values.beta_1y, 10);
+    assert.deepEqual(result.observations[0].upcomingEarnings, includeUpcomingEarnings
+      ? { reportDate: "2026-10-27", exchangeTimezone: "America/New_York" } : undefined);
+  }
+});
+
 test("maps non-EPS screener fundamentals without deriving earnings metrics", () => {
   const source = Object.fromEntries(SOURCE_METRIC_DEFINITIONS.map((definition, index) => [
     definition.key,

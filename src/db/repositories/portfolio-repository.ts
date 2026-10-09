@@ -202,11 +202,11 @@ export function replaceDefaultPortfolio(
       .where(eq(portfolioCashPositions.portfolioId, DEFAULT_PORTFOLIO_ID))
       .run();
 
-    if (items.length > 0) {
+    for (let offset = 0; offset < items.length; offset += 500) {
       transaction
         .insert(portfolioItems)
         .values(
-          items.map((item) => ({
+          items.slice(offset, offset + 500).map((item) => ({
             id: item.id,
             portfolioId: DEFAULT_PORTFOLIO_ID,
             assetType: item.kind,
@@ -283,28 +283,30 @@ export function saveDefaultPortfolioAsEtf(
       })
       .run();
 
-    transaction
-      .insert(portfolioItems)
-      .values(
-        source.items.map((item) => ({
-          id: randomUUID(),
-          portfolioId,
-          assetType: item.kind,
-          etfId: item.kind === "etf" ? item.referenceId : null,
-          securityId: item.kind === "security" ? item.referenceId : null,
-          allocationWeight: item.allocationWeight,
-          quantity: item.quantity,
-          inputMode: item.inputMode,
-          inputAmount: item.inputAmount,
-          initialPriceUsd: item.initialPriceUsd,
-          initialValueUsd: item.initialValueUsd,
-          priceSymbol: item.priceSymbol,
-          priceCurrency: item.priceCurrency,
-          createdAt: now,
-          updatedAt: now,
-        })),
-      )
-      .run();
+    for (let offset = 0; offset < source.items.length; offset += 500) {
+      transaction
+        .insert(portfolioItems)
+        .values(
+          source.items.slice(offset, offset + 500).map((item) => ({
+            id: randomUUID(),
+            portfolioId,
+            assetType: item.kind,
+            etfId: item.kind === "etf" ? item.referenceId : null,
+            securityId: item.kind === "security" ? item.referenceId : null,
+            allocationWeight: item.allocationWeight,
+            quantity: item.quantity,
+            inputMode: item.inputMode,
+            inputAmount: item.inputAmount,
+            initialPriceUsd: item.initialPriceUsd,
+            initialValueUsd: item.initialValueUsd,
+            priceSymbol: item.priceSymbol,
+            priceCurrency: item.priceCurrency,
+            createdAt: now,
+            updatedAt: now,
+          })),
+        )
+        .run();
+    }
 
     if (source.cashPositions.length > 0) {
       transaction

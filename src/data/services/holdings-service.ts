@@ -1,4 +1,4 @@
-import { sourceFailure } from "@/data/providers/holdings-request";
+import { HoldingsSourceError, sourceFailure } from "@/data/providers/holdings-request";
 import { holdingsSourceIssues } from "@/domain/holdings-source-issues";
 import { catalogRevision } from "@/server/site-runtime";
 import "server-only";
@@ -34,7 +34,7 @@ import {
   loadPortfolioById,
 } from "@/db/repositories/portfolio-repository";
 import type { HoldingsSnapshot } from "@/domain/etf";
-import { deriveDynamicCreatorHoldings } from "@/domain/etf-creator";
+import { creatorCompositionModel, deriveDynamicCreatorHoldings, hasCreatorOverlapMultipliers } from "@/domain/etf-creator";
 import { analyzePortfolio } from "@/domain/processors/analyze-portfolio";
 import { deriveMarketValueHoldings } from "@/domain/processors/derive-market-value-holdings";
 import { normalizeHoldingWeights } from "@/domain/processors/normalize-holding-weights";
@@ -43,6 +43,7 @@ import {
   valuePortfolioItems,
 } from "./market-price-service";
 import { mapWithConcurrency } from "@/domain/async-utils";
+import { resolveCreatorSubsets } from "./etf-creator-subsets";
 
 const DEFAULT_TTL_SECONDS = 60 * 60 * 24;
 const DEFAULT_REFRESH_CONCURRENCY = 4;
@@ -218,9 +219,40 @@ async function buildDynamicCustomEtfSnapshot(
 
   const ttlHours = cacheTtlSeconds() / 3600;
   const latest = findLatestSnapshot(etf.id);
+  if (definition.criteria?.subsets) {
+    try {
+      const resolved = await resolveCreatorSubsets(definition.criteria.subsets, options);
+      if (resolved.emptySubsetNames.length || resolved.holdings.length === 0) throw new HoldingsSourceError("INCOMPLETE_SUBSET", `Allocated subsets have no available positive weights: ${resolved.emptySubsetNames.join(", ")}.`);
+      const asOf = resolved.snapshots.map((snapshot) => snapshot.asOf).sort()[0];
+      const stored = persistSnapshot({
+        etf, asOf, fetchedAt: new Date().toISOString(), sourceUrl: resolved.source.sourceUrl,
+        sourceHash: createHash("sha256").update(JSON.stringify({ model: "dynamic-source-subsets", subsets: definition.criteria.subsets, asOf: resolved.snapshots.map((snapshot) => [snapshot.etf.id, snapshot.asOf]), holdings: resolved.holdings })).digest("hex"),
+        holdings: resolved.holdings,
+      });
+      const snapshot = loadSnapshot(etf, stored, resolved.snapshots.some((source) => source.sourceStatus === "stale") ? "stale" : "cached", ttlHours);
+      snapshot.sourceIssues = holdingsSourceIssues(resolved.snapshots);
+      const availableIds = new Set(resolved.holdings.map((holding) => holding.securityId));
+      const missing = [...new Map(resolved.parts.flatMap((part) => part.missingSecurities).filter((security) => !availableIds.has(security.securityId)).map((security) => [security.securityId, security])).values()];
+      const selected = new Set(resolved.parts.filter((part) => part.allocationWeight > 0).flatMap((part) => part.selectedSecurities.map((security) => security.securityId)));
+      if (missing.length) snapshot.constituentCoverage = { used: selected.size - missing.length, total: selected.size, missingTickers: missing.map((security) => security.ticker) };
+      return snapshot;
+    } catch (error) {
+      if (latest) return { ...loadSnapshot(etf, latest, "stale", ttlHours), sourceIssues: [{ ticker: etf.ticker, asOf: latest.asOf, ...sourceFailure(error) }] };
+      throw error;
+    }
+  }
   let source: HoldingsSnapshot;
+  let overlap: HoldingsSnapshot | null = null;
   try {
-    source = await getHoldingsSnapshot(definition.sourceEtfId, options);
+    const needsOverlap = hasCreatorOverlapMultipliers(definition.criteria?.weightMultipliers);
+    const referenceId = definition.criteria?.overlapEtfId;
+    if (needsOverlap && (!referenceId || referenceId === etf.id)) {
+      throw new Error(`${etf.ticker} needs a valid overlap reference for its multipliers.`);
+    }
+    [source, overlap] = await Promise.all([
+      getHoldingsSnapshot(definition.sourceEtfId, options),
+      needsOverlap ? getHoldingsSnapshot(referenceId!, options) : Promise.resolve(null),
+    ]);
   } catch (error) {
     if (latest) return { ...loadSnapshot(etf, latest, "stale", ttlHours),
       sourceIssues: [{ ticker: etf.ticker, asOf: latest.asOf, ...sourceFailure(error) }] };
@@ -230,6 +262,9 @@ async function buildDynamicCustomEtfSnapshot(
   const derived = deriveDynamicCreatorHoldings(
     source.holdings,
     definition.selectedSecurities,
+    definition.criteria?.weightingMode,
+    definition.criteria?.weightMultipliers,
+    new Set(overlap?.holdings.map((holding) => holding.securityId) ?? []),
   );
   if (derived.holdings.length === 0) {
     throw new Error(
@@ -240,7 +275,10 @@ async function buildDynamicCustomEtfSnapshot(
   const sourceHash = createHash("sha256")
     .update(
       JSON.stringify({
-        model: "dynamic-source-free-float",
+        model: creatorCompositionModel(definition.criteria?.weightingMode, definition.criteria?.weightMultipliers),
+        weightMultipliers: definition.criteria?.weightMultipliers,
+        overlapEtfId: definition.criteria?.overlapEtfId,
+        overlapAsOf: overlap?.asOf,
         sourceEtfId: source.etf.id,
         sourceAsOf: source.asOf,
         selectedSecurities: definition.selectedSecurities,
@@ -262,10 +300,10 @@ async function buildDynamicCustomEtfSnapshot(
   const snapshot = loadSnapshot(
     etf,
     stored,
-    source.sourceStatus,
+    overlap?.sourceStatus === "stale" ? "stale" : source.sourceStatus,
     ttlHours,
   );
-  snapshot.sourceIssues = holdingsSourceIssues([source]);
+  snapshot.sourceIssues = holdingsSourceIssues(overlap ? [source, overlap] : [source]);
   return derived.missingSecurities.length > 0
     ? {
         ...snapshot,

@@ -18,6 +18,7 @@ import type { EtfShareClass } from "@/domain/etf";
 import { replacePortfolioEtfRecord } from "@/db/repositories/local-etf-repository";
 import {
   SUPPORTED_CASH_CURRENCIES,
+  MAX_PORTFOLIO_ITEMS,
   type PortfolioAnalysis,
   type PortfolioAssetKind,
   type PortfolioCashPosition,
@@ -56,7 +57,6 @@ export interface PortfolioCashDraft {
   amount: number;
 }
 
-const MAX_PORTFOLIO_ITEMS = 50;
 const MAX_CASH_POSITIONS = SUPPORTED_CASH_CURRENCIES.length;
 
 export class PortfolioRequestError extends Error {
@@ -357,6 +357,26 @@ export async function getPortfolioById(
   }
 }
 
+export async function previewPortfolio(
+  drafts: PortfolioItemDraft[],
+  cashDrafts: PortfolioCashDraft[] = [],
+  options: PortfolioRefreshOptions = {},
+): Promise<PortfolioRecord> {
+  ensureLocalDatabase();
+  validateDrafts(drafts);
+  const cash = await valueCashPositions(validateCashDrafts(cashDrafts), options);
+  const cashValueUsd = cash.reduce((sum, position) => sum + (position.valueUsd ?? 0), 0);
+  const items = await resolveDrafts(drafts, cashValueUsd, options);
+  const totalMarketValueUsd = items.reduce((sum, item) => sum + (item.currentValueUsd ?? 0), cashValueUsd);
+  if (!Number.isFinite(totalMarketValueUsd) || totalMarketValueUsd <= 0) throw new PortfolioRequestError("Net portfolio value must be positive.");
+  const cashPositions = cash.map((position) => ({ ...position, weight: (position.valueUsd ?? 0) / totalMarketValueUsd * 100 }));
+  const analysis = await buildAnalysis(items, cashValueUsd / totalMarketValueUsd * 100, options);
+  return {
+    id: "clone-preview", name: "Portfolio preview", baseCurrency: "USD", updatedAt: new Date().toISOString(),
+    items, cashPositions, analysis: analysis ? { ...analysis, totalMarketValueUsd } : null,
+  };
+}
+
 export async function savePortfolio(
   drafts: PortfolioItemDraft[],
   cashDrafts: PortfolioCashDraft[] = [],
@@ -528,8 +548,8 @@ export async function savePortfolioAsEtf(
     if (stored.items.some((item) => !item.quantity)) {
       anchorPortfolioQuantities(stored.id, portfolio.items);
     }
-    if (portfolio.items.length === 0) {
-      throw new PortfolioRequestError("Add portfolio positions before saving it as an ETF.");
+    if (portfolio.items.length === 0 && portfolio.cashPositions.length === 0) {
+      throw new PortfolioRequestError("Add positions or cash before saving the portfolio.");
     }
 
     for (const item of portfolio.items) {

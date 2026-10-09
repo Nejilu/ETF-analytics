@@ -29,7 +29,7 @@ for (const branch of ["local", "web", "fresh"] as const) {
       if (branch !== "fresh") {
         const previous = join(directory, "previous");
         mkdirSync(join(previous, "meta"), { recursive: true });
-        const entries = journal.entries.filter((entry) => entry.tag !== (
+        const entries = journal.entries.filter((entry) => entry.idx < 17 && entry.tag !== (
           branch === "local" ? "0014_site_visibility" : "0016_ai_snapshot_reuse"
         )).map((entry, idx) => ({ ...entry, idx }));
         writeFileSync(join(previous, "meta/_journal.json"), JSON.stringify({ ...journal, entries }));

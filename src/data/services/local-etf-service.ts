@@ -6,6 +6,7 @@ import {
   findEtfByTicker,
 } from "@/db/repositories/catalog-repository";
 import {
+  customEtfDependsOn,
   deleteLocalEtfRecord,
   findDynamicCustomEtfDefinition,
   findLocalEtfDefinitionRecord,
@@ -15,6 +16,7 @@ import type { EtfShareClass } from "@/domain/etf";
 import type { EtfCreatorCriteria } from "@/domain/etf-creator";
 import {
   dynamicCreatorDescription,
+  hasCreatorOverlapMultipliers,
   normalizeCreatorHoldings,
 } from "@/domain/etf-creator";
 import type { LocalEtfDetail } from "@/domain/local-etf";
@@ -29,7 +31,8 @@ import {
   updatePortfolioEtf,
 } from "./portfolio-service";
 import { getHoldingsSnapshot } from "./holdings-service";
-import { validatedCreatorCriteria } from "./etf-creator-service";
+import { EtfCreatorRequestError, validatedCreatorCriteria } from "./etf-creator-service";
+import { resolveCreatorSubsets } from "./etf-creator-subsets";
 
 export class LocalEtfRequestError extends Error {
   constructor(message: string) {
@@ -191,7 +194,47 @@ export async function updateCustomLocalEtf(
   if (!sourceEtf || sourceEtf.id === existing.id) {
     throw new LocalEtfRequestError("Select a valid base ETF before saving.");
   }
-  const criteria = validatedCreatorCriteria(draft.criteria);
+  let criteria: EtfCreatorCriteria;
+  try {
+    criteria = validatedCreatorCriteria(draft.criteria);
+  } catch (error) {
+    if (error instanceof EtfCreatorRequestError) throw new LocalEtfRequestError(error.message);
+    throw error;
+  }
+  if (
+    customEtfDependsOn(sourceEtf.id, existing.id) ||
+    (criteria.overlapEtfId && customEtfDependsOn(criteria.overlapEtfId, existing.id))
+  ) {
+    throw new LocalEtfRequestError("Choose source and overlap ETFs that do not depend on this ETF.");
+  }
+  if (criteria.subsets) {
+    for (const subset of criteria.subsets) {
+      if (customEtfDependsOn(subset.sourceEtfId, id) || (subset.criteria.overlapEtfId && customEtfDependsOn(subset.criteria.overlapEtfId, id))) {
+        throw new LocalEtfRequestError("Subset sources and references cannot depend on the ETF being edited.");
+      }
+    }
+    const previousDefinition = findDynamicCustomEtfDefinition(id);
+    const previousSubsets = previousDefinition?.criteria?.subsets ?? [];
+    const resolved = await resolveCreatorSubsets(criteria.subsets);
+    for (const part of resolved.parts) {
+      const previous = previousSubsets.find((subset) => subset.id === part.id && subset.sourceEtfId === part.sourceEtfId);
+      const previousIds = new Set((previous?.selectedSecurities ?? (!previousSubsets.length && previousDefinition?.sourceEtfId === part.sourceEtfId ? previousDefinition.selectedSecurities : [])).map((security) => security.securityId));
+      if (part.missingSecurities.some((security) => !previousIds.has(security.securityId))) throw new LocalEtfRequestError("Some selected securities do not belong to their subset’s source ETF.");
+    }
+    if (resolved.emptySubsetNames.length) throw new LocalEtfRequestError(`Keep a positive weight in each allocated subset: ${resolved.emptySubsetNames.join(", ")}.`);
+    criteria.subsets = resolved.subsets;
+    const source = resolved.source;
+    const selectedSecurities = [...new Map(resolved.subsets.flatMap((subset) => subset.selectedSecurities).map((security) => [security.securityId, security])).values()];
+    const updated = replaceCustomEtfRecord({
+      visibility: draft.visibility, id, ticker: identity.ticker, name: identity.name,
+      description: dynamicCreatorDescription(identity.editableDescription, resolved.holdings.length, source.etf.ticker, undefined, undefined, criteria.subsets),
+      editableDescription: identity.editableDescription, sourceEtfId: source.etf.id,
+      sourceTicker: source.etf.ticker, sourceAsOf: source.asOf, sourceFetchedAt: source.fetchedAt, sourceUrl: source.sourceUrl,
+      criteria, selectedSecurities, selectedHoldings: resolved.holdings,
+    });
+    if (!updated) throw new LocalEtfNotFoundError();
+    return updated;
+  }
   const selectedSecurityIds = [
     ...new Set(draft.selectedSecurityIds.map((value) => value.trim()).filter(Boolean)),
   ];
@@ -230,21 +273,29 @@ export async function updateCustomLocalEtf(
       previousById.get(securityId)?.ticker ??
       "—",
   }));
+  const overlap = hasCreatorOverlapMultipliers(criteria.weightMultipliers)
+    ? await getHoldingsSnapshot(criteria.overlapEtfId!)
+    : null;
   const selectedHoldings = normalizeCreatorHoldings(
     selectedSecurityIds.flatMap((securityId) => {
       const holding = sourceById.get(securityId);
       return holding ? [holding] : [];
     }),
+    criteria.weightingMode,
+    criteria.weightMultipliers,
+    new Set(overlap?.holdings.map((holding) => holding.securityId) ?? []),
   );
   if (selectedHoldings.length === 0) {
     throw new LocalEtfRequestError(
-      "The retained securities have no usable free-float weight.",
+      "The selected weighting and multipliers must leave at least one positive weight.",
     );
   }
   const description = dynamicCreatorDescription(
     identity.editableDescription,
     selectedSecurities.length,
     sourceEtf.ticker,
+    criteria.weightingMode,
+    criteria.weightMultipliers,
   );
   const updated = replaceCustomEtfRecord({
     visibility: draft.visibility,

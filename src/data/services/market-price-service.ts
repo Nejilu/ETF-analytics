@@ -43,6 +43,7 @@ const inFlightFx = new Map<string, Promise<FxRate>>();
 
 export interface MarketRefreshOptions {
   forceRefresh?: boolean;
+  requireFresh?: boolean;
 }
 
 export interface SecurityListingPriceRequest {
@@ -178,7 +179,7 @@ async function refreshFxRate(
       sourceStatus: "live",
     });
   } catch (error) {
-    if (cached) return { ...cached, sourceStatus: "stale" };
+    if (cached && !options.requireFresh) return { ...cached, sourceStatus: "stale" };
     throw error;
   }
 }
@@ -199,7 +200,7 @@ export async function getFxRate(
     };
   }
 
-  const key = `${databasePath()}::fx:${currency.toUpperCase()}::${options.forceRefresh ? "force" : "cached"}`;
+  const key = `${databasePath()}::fx:${currency.toUpperCase()}::${options.forceRefresh ? "force" : "cached"}::${options.requireFresh ? "strict" : "fallback"}`;
   const existing = inFlightFx.get(key);
   if (existing) return existing;
   const request = refreshFxRate(currency, options).finally(() => {
@@ -290,7 +291,7 @@ async function refreshMarketPrice(
     });
   } catch (error) {
     if (error instanceof MarketPriceRequestError) throw error;
-    if (fallbackCached) {
+    if (fallbackCached && !options.requireFresh) {
       return { ...fallbackCached, sourceStatus: "stale" };
     }
     throw error;
@@ -302,7 +303,7 @@ export async function getMarketPrice(
   assetId: string,
   options: MarketRefreshOptions = {},
 ): Promise<MarketPrice> {
-  const key = `${databasePath()}::${assetKind}:${assetId}::${options.forceRefresh ? "force" : "cached"}`;
+  const key = `${databasePath()}::${assetKind}:${assetId}::${options.forceRefresh ? "force" : "cached"}::${options.requireFresh ? "strict" : "fallback"}`;
   const existing = inFlightPrices.get(key);
   if (existing) return existing;
   const request = refreshMarketPrice(assetKind, assetId, options)

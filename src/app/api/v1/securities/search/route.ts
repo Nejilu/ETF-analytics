@@ -13,7 +13,9 @@ function normalized(value: string): string {
 }
 
 async function handleGET(request: Request) {
-  const query = normalized(new URL(request.url).searchParams.get("q") ?? "");
+  const params = new URL(request.url).searchParams;
+  const query = normalized(params.get("q") ?? "");
+  const equityOnly = params.get("assetClass") === "equity";
   if (query.length < 2) {
     return Response.json({ data: [] });
   }
@@ -35,6 +37,7 @@ async function handleGET(request: Request) {
         alias: securityQuoteAlias(holding),
       }))
       .filter(({ holding, alias }) => {
+        if (equityOnly && !holding.assetClass.toLowerCase().includes("equity")) return false;
         if (!holding.ticker || holding.ticker === "—") return false;
         const searchable = [
           holding.ticker,

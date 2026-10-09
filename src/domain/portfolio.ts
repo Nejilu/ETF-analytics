@@ -4,6 +4,7 @@ export type PortfolioAssetKind = "etf" | "security";
 export type PortfolioInputMode = "value" | "shares";
 export type PriceStatus = "live" | "cached" | "stale";
 export type PortfolioExposureMode = "gross-normalized" | "net-total";
+export const MAX_PORTFOLIO_ITEMS = 5_000;
 
 export const SUPPORTED_CASH_CURRENCIES = [
   "USD",

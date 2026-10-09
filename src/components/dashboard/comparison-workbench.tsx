@@ -1,6 +1,7 @@
 "use client";
 
 import { HoldingsSourceWarning } from "./holdings-source-warning";
+import { MetricCard } from "./metric-card";
 import { PortfolioValuationPanel, formatPortfolioUsd } from "./portfolio-valuation-panel";
 import { portfolioPositionValueUsd } from "@/domain/portfolio-valuation";
 
@@ -32,7 +33,19 @@ import type {
 import type {
   HoldingsAnalysisPosition,
   HoldingsAnalysisResult,
+  DistortionMode,
 } from "@/domain/holdings-analysis";
+import { DEFAULT_DISTORTION_TOP_COUNT } from "@/domain/holdings-analysis";
+import { calculateHoldingsDistortion } from "@/domain/processors/calculate-holdings-distortion";
+import {
+  rankDistortionPositions,
+  rankDistortionTablePositions,
+  absoluteDistortionLabel,
+  relativeDistortionLabel,
+  type DistortionRankingBasis,
+  type DistortionTableRanking,
+  type RankedDistortionPosition,
+} from "@/domain/distortion-rankings";
 import {
   countryToContinent,
   geographicCountryLabel,
@@ -265,26 +278,6 @@ function FundSelector({
         </div>
       </div>
     </section>
-  );
-}
-
-function MetricCard({
-  label,
-  value,
-  detail,
-  tone = "neutral",
-}: {
-  label: ReactNode;
-  value: ReactNode;
-  detail: ReactNode;
-  tone?: "neutral" | "positive" | "negative" | "left" | "right";
-}) {
-  return (
-    <article className={`metric-card metric-card--${tone}`}>
-      <div className="metric-card__label">{label}</div>
-      <strong>{value}</strong>
-      <p>{detail}</p>
-    </article>
   );
 }
 
@@ -807,80 +800,143 @@ function distortionReading(score: number | null) {
   return "High weighting distortion";
 }
 
-function signedPercent(value: number) {
-  return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+function DistortionDirectionRanking({ positions, basis, direction }: {
+  positions: RankedDistortionPosition[];
+  basis: DistortionRankingBasis;
+  direction: "over" | "under";
+}) {
+  const displayed = positions.slice(0, 5);
+  return (
+    <section className={`distortion-direction distortion-direction--${direction}`} aria-label={`${basis === "absolute" ? "Absolute" : "Relative"} ${direction === "over" ? "overweights" : "underweights"}`}>
+      <header className="distortion-direction-heading">
+        <h3>{direction === "over" ? "Overweights" : "Underweights"}</h3>
+        <span>{positions.length > 5 ? `Top 5 of ${positions.length}` : `${positions.length} position${positions.length === 1 ? "" : "s"}`}</span>
+      </header>
+      {displayed.length > 0 ? (
+        <ol className="distortion-ranking">
+          {displayed.map((position, index) => (
+            <li key={position.securityId}>
+              <span className="distortion-ranking-rank">{index + 1}</span>
+              <div className="distortion-ranking-security">
+                <div className="distortion-ranking-value">
+                  <strong title={position.ticker}>{position.ticker}</strong>
+                  <b className={direction === "over" ? "distortion-over" : "distortion-under"}>
+                    {basis === "relative" ? relativeDistortionLabel(position.relativeWeight!) : absoluteDistortionLabel(position.weightDelta)}
+                  </b>
+                </div>
+                <span className="distortion-ranking-name" title={position.name}>{position.name}</span>
+                <small>{formatPercent(position.actualWeight, 2)} vs {formatPercent(position.counterfactualWeight, 2)}{position.actualWeight === 0 ? " · not held" : ""}</small>
+              </div>
+            </li>
+          ))}
+        </ol>
+      ) : <p className="distortion-ranking-empty">No {direction === "over" ? "overweights" : "underweights"} in this selection.</p>}
+    </section>
+  );
 }
 
-function HoldingsDistortionPanel({
-  analysis,
-}: {
+function DistortionRankingPanel({ analysis, basis }: {
   analysis: HoldingsAnalysisResult;
+  basis: DistortionRankingBasis;
 }) {
-  const contributors = analysis.positions
-    .filter(
-      (position): position is HoldingsAnalysisPosition & {
-        actualWeight: number;
-        counterfactualWeight: number;
-        weightDelta: number;
-        distortionContribution: number;
-      } => position.distortionStatus === "covered",
-    )
-    .slice(0, 8);
-  const largestContribution = Math.max(
-    ...contributors.map((position) => position.distortionContribution),
-    0,
-  );
-
+  const ranks = useMemo(() => rankDistortionPositions(analysis.positions, basis), [analysis.positions, basis]);
   return (
     <article className="panel holdings-distortion-panel">
       <div className="panel-heading">
         <div>
-          <span className="eyebrow">ACWI free-float counterfactual</span>
-          <h2>Where the weighting departs from free float</h2>
+          <span className="eyebrow">{basis === "absolute" ? "Weight differences" : "Weight ratios"}</span>
+          <h2>{basis === "absolute" ? "Absolute weight gaps" : "Relative weight multiples"}</h2>
         </div>
-        <span className="info-chip">
-          {distortionReading(analysis.distortion.score)}
-        </span>
+        <span className="info-chip">{basis === "absolute" ? "Percentage points" : "× / ÷"}</span>
       </div>
       <p className="holdings-method-copy">
-        The index is the minimum share of portfolio weight that would need to be
-        reallocated to match ACWI-implied free-float weights across the same
-        covered securities. A score of 0 is aligned; 100 is the theoretical
-        maximum.
+        {basis === "absolute" ? "Portfolio weight minus counterfactual weight, ranked by the largest gap on each side." : "Portfolio weight relative to its counterfactual: ×2 means double the weight; ÷2 means half. 0× means the security is not held."}
       </p>
-      <div className="distortion-contributors">
-        {contributors.map((position) => (
-          <div className="distortion-row" key={position.securityId}>
-            <div className="distortion-row__identity">
-              <strong>{position.ticker}</strong>
-              <span>{position.name}</span>
-            </div>
-            <div className="distortion-row__bar" aria-hidden="true">
-              <span
-                className={position.weightDelta >= 0 ? "is-over" : "is-under"}
-                style={{
-                  width: `${largestContribution > 0 ? (position.distortionContribution / largestContribution) * 100 : 0}%`,
-                }}
-              />
-            </div>
-            <strong className={position.weightDelta >= 0 ? "is-over" : "is-under"}>
-              {signedPercent(position.weightDelta)}
-            </strong>
-            <small>{position.distortionContribution.toFixed(2)} pts</small>
-          </div>
-        ))}
+      <div className="distortion-direction-grid">
+        <DistortionDirectionRanking positions={ranks.overweights} basis={basis} direction="over" />
+        <DistortionDirectionRanking positions={ranks.underweights} basis={basis} direction="under" />
       </div>
+      {basis === "relative" && ranks.noBenchmarkCount > 0 ? (
+        <p className="distortion-ranking-note">{ranks.noBenchmarkCount} holding{ranks.noBenchmarkCount === 1 ? " has" : "s have"} no ACWI weight. Their relative multiple is undefined; they appear in the absolute ranking.</p>
+      ) : null}
+    </article>
+  );
+}
+
+function HoldingsDistortionRankings({ analysis }: { analysis: HoldingsAnalysisResult }) {
+  return (
+    <section aria-label="Absolute and relative distortion rankings">
+      <div className="distortion-rankings-grid">
+        <DistortionRankingPanel analysis={analysis} basis="absolute" />
+        <DistortionRankingPanel analysis={analysis} basis="relative" />
+      </div>
+      <p className="holdings-method-copy distortion-ranking-method">
+        {analysis.distortion.mode === "market-coverage"
+          ? "The index compares all positive equity positions with the entire ACWI equity universe. ACWI securities absent from the portfolio have zero portfolio weight; portfolio equities outside ACWI have zero benchmark weight. Both equity distributions are normalized to 100%."
+          : `The index compares ${analysis.distortion.mode === "top-holdings" ? `the ${analysis.distortion.topCount} largest positive equity positions` : "all positive equity positions"} with ACWI-implied free-float weights for the same covered securities. Each covered distribution is normalized to 100%.`}
+        {" "}A score of 0 is aligned; 100 is the theoretical maximum. One point represents 1% of equity weight to reallocate. Cash, non-equity assets and shorts are excluded.
+      </p>
       <div className="holdings-method-note">
         <span>
           Coverage {analysis.distortion.coverageWeight.toFixed(1)}% · {analysis.distortion.coveredHoldings}/
           {analysis.distortion.eligibleHoldings} equity holdings
         </span>
         <span>
-          ACWI as of {formatDate(analysis.distortion.referenceAsOf)} · score
-          computed on the covered universe and renormalized to 100%
+          ACWI as of {formatDate(analysis.distortion.referenceAsOf)} · {distortionReading(analysis.distortion.score)}
         </span>
       </div>
-    </article>
+    </section>
+  );
+}
+
+function HoldingsDistortionDetails({ analysis }: { analysis: HoldingsAnalysisResult }) {
+  const [mode, setMode] = useState<DistortionMode>("top-holdings");
+  const [topCount, setTopCount] = useState(DEFAULT_DISTORTION_TOP_COUNT);
+  const effectiveCount = Math.min(topCount, analysis.equityHoldingsCount);
+  const selected = useMemo(() => ({
+    ...analysis,
+    ...calculateHoldingsDistortion(analysis.positions, analysis.distortionReferencePositions, analysis.distortion, mode, effectiveCount),
+  }), [analysis, mode, effectiveCount]);
+  const { distortion } = selected;
+  const market = mode === "market-coverage";
+  return (
+    <>
+      <section className="panel distortion-controls" aria-label="Distortion calculation settings">
+        <div className="panel-heading">
+          <div><span className="eyebrow">Reference universe</span><h2>Choose the distortion view</h2></div>
+          <div className="segmented-control" role="group" aria-label="Distortion mode">
+            {([
+              ["top-holdings", "Top holdings"],
+              ["all-holdings", "All holdings"],
+              ["market-coverage", "Market Coverage"],
+            ] as const).map(([value, label]) => (
+              <button key={value} type="button" className={mode === value ? "is-active" : ""} aria-pressed={mode === value} onClick={() => setMode(value)}>{label}</button>
+            ))}
+          </div>
+        </div>
+        {mode === "top-holdings" ? (
+          <div className="distortion-top-control">
+            <label htmlFor="distortion-top-count">Largest equity positions <strong>Top {effectiveCount}</strong></label>
+            <input id="distortion-top-count" type="range" min={Math.min(2, Math.max(1, analysis.equityHoldingsCount))} max={Math.max(1, analysis.equityHoldingsCount)} step={1} value={Math.max(1, effectiveCount)} disabled={analysis.equityHoldingsCount < 2} onChange={(event) => setTopCount(Number(event.target.value))} aria-valuetext={`Top ${effectiveCount} equity positions`} aria-describedby="distortion-top-description" />
+            <small id="distortion-top-description">Top 30 by default · {formatPercent(distortion.selectedWeight, 1)} of published portfolio weight selected · recalculates as you move the slider</small>
+          </div>
+        ) : null}
+      </section>
+      {distortion.coverageStatus !== "complete" ? (
+        <div className="alert holdings-distortion-alert">
+          ACWI matching coverage is {distortion.coverageWeight.toFixed(1)}%: {distortion.missingHoldings} selected equity holding{distortion.missingHoldings === 1 ? " is" : "s are"} outside the current ACWI universe.
+          {market ? " These positions are included with zero benchmark weight. All ACWI securities remain in the benchmark." : " The score uses only common securities, renormalized to 100%."}
+        </div>
+      ) : null}
+      <section className="metric-grid" aria-label="Distortion metrics">
+        <MetricCard label={market ? "Market Coverage" : "Weight distortion index"} value={distortion.score === null ? "—" : distortion.score.toFixed(1)} detail="1 point = 1% of equity weight to reallocate · 0 to 100" tone={distortion.score !== null && distortion.score < 2 ? "positive" : "left"} />
+        <MetricCard label="ACWI matching coverage" value={formatPercent(distortion.coverageWeight, 1)} detail={`${distortion.coveredHoldings} of ${distortion.eligibleHoldings} selected equity holdings`} tone={distortion.coverageStatus === "complete" ? "positive" : "neutral"} />
+        <MetricCard label={market ? "Full ACWI universe" : "Common equity holdings"} value={`${distortion.referenceHoldings}`} detail={market ? "Every ACWI equity position in the benchmark" : "Positions used in both distributions"} />
+        <MetricCard label="Outside ACWI" value={`${distortion.missingHoldings}`} detail={market ? "Included with zero benchmark weight" : "Equity positions excluded from the score"} tone={distortion.missingHoldings === 0 ? "positive" : "right"} />
+      </section>
+      <HoldingsDistortionRankings analysis={selected} />
+      <DistortionPositionsTable analysis={selected} />
+    </>
   );
 }
 
@@ -1025,17 +1081,11 @@ function DistortionPositionsTable({
   analysis: HoldingsAnalysisResult;
 }) {
   const [query, setQuery] = useState("");
-  const [ranking, setRanking] = useState<"distortion" | "weight">("distortion");
+  const [ranking, setRanking] = useState<DistortionTableRanking>("weight");
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
-  const viewKey = `${analysis.calculatedAt}:${ranking}`;
+  const viewKey = `${analysis.calculatedAt}:${analysis.distortion.mode}:${analysis.distortion.topCount}:${ranking}`;
   const rows = useMemo(
-    () =>
-      [...analysis.positions].sort((left, right) =>
-        ranking === "weight"
-          ? right.publishedWeight - left.publishedWeight
-          : (right.distortionContribution ?? -1) -
-            (left.distortionContribution ?? -1),
-      ),
+    () => rankDistortionTablePositions(analysis.positions, ranking),
     [analysis.positions, ranking],
   );
   const isExpanded = expandedKey === viewKey;
@@ -1046,21 +1096,13 @@ function DistortionPositionsTable({
   const hasAdditionalRows = matchingRows.length > INITIAL_VISIBLE_POSITIONS;
 
   return (
-    <section className="panel holdings-position-table">
+    <section className="panel holdings-position-table distortion-position-table">
       <div className="panel-heading panel-heading--table">
         <div>
           <span className="eyebrow">Security-level analysis</span>
-          <h2>{analysis.etf.ticker} holdings and counterfactual weights</h2>
+          <h2>{analysis.etf.ticker} {analysis.distortion.mode === "market-coverage" ? "and full ACWI universe" : "holdings and counterfactual weights"}</h2>
         </div>
-        <div className="segmented-control" aria-label="Rank holdings">
-          <button
-            type="button"
-            className={ranking === "distortion" ? "is-active" : ""}
-            aria-pressed={ranking === "distortion"}
-            onClick={() => setRanking("distortion")}
-          >
-            Distortion
-          </button>
+        <div className="segmented-control distortion-table-ranking" role="group" aria-label="Rank holdings">
           <button
             type="button"
             className={ranking === "weight" ? "is-active" : ""}
@@ -1069,8 +1111,27 @@ function DistortionPositionsTable({
           >
             ETF weight
           </button>
+          <button
+            type="button"
+            className={ranking === "absolute" ? "is-active" : ""}
+            aria-pressed={ranking === "absolute"}
+            onClick={() => setRanking("absolute")}
+          >
+            Distortion delta
+          </button>
+          <button
+            type="button"
+            className={ranking === "relative" ? "is-active" : ""}
+            aria-pressed={ranking === "relative"}
+            onClick={() => setRanking("relative")}
+          >
+            Distortion multiple
+          </button>
         </div>
       </div>
+      {ranking === "relative" ? (
+        <p className="distortion-table-ranking-note">Largest relative departures first, on either side: ×5 and ÷5 have the same magnitude. 0× means not held; undefined multiples sort last.</p>
+      ) : null}
       <HoldingsTableSearch
         query={query}
         onChange={setQuery}
@@ -1084,15 +1145,16 @@ function DistortionPositionsTable({
             <tr>
               <th>Security</th>
               <th>Published weight</th>
-              <th>Covered ETF weight</th>
+              <th>{analysis.distortion.mode === "market-coverage" ? "Equity portfolio weight" : "Selected covered weight"}</th>
               <th>ACWI-implied weight</th>
               <th>Delta</th>
+              <th>Weight multiple</th>
               <th>Score contribution</th>
             </tr>
           </thead>
           <tbody id="holdings-analysis-positions">
             {matchingRows.length === 0 ? (
-              <tr><td colSpan={6} className="holdings-table-empty">No holdings match your search.</td></tr>
+              <tr><td colSpan={7} className="holdings-table-empty">No holdings match your search.</td></tr>
             ) : null}
             {visibleRows.map((position) => (
               <tr key={position.securityId}>
@@ -1115,7 +1177,16 @@ function DistortionPositionsTable({
                     </span>
                   ) : (
                     <span className={position.weightDelta >= 0 ? "distortion-over" : "distortion-under"}>
-                      {signedPercent(position.weightDelta)}
+                      {absoluteDistortionLabel(position.weightDelta)}
+                    </span>
+                  )}
+                </td>
+                <td>
+                  {position.relativeWeight === null ? (
+                    <span title={position.counterfactualWeight === 0 ? "No ACWI-implied weight; the multiple is undefined." : "No comparable counterfactual weight."}>—</span>
+                  ) : (
+                    <span className={position.relativeWeight > 1 ? "distortion-over" : position.relativeWeight < 1 ? "distortion-under" : undefined}>
+                      {relativeDistortionLabel(position.relativeWeight)}
                     </span>
                   )}
                 </td>
@@ -1390,6 +1461,14 @@ export function ComparisonWorkbench({
   const [holdingsView, setHoldingsView] = useState<
     "holdings" | "distortion"
   >("holdings");
+  const previousHoldingsView = useRef(holdingsView);
+  const distortionDetailsLink = useRef<HTMLButtonElement>(null);
+  const holdingsReturnLink = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (previousHoldingsView.current === holdingsView) return;
+    (holdingsView === "distortion" ? holdingsReturnLink : distortionDetailsLink).current?.focus();
+    previousHoldingsView.current = holdingsView;
+  }, [holdingsView]);
   const [holdingsWeightView, setHoldingsWeightView] =
     useState<HoldingsWeightView>("securities");
   const [cashDisplay, setCashDisplay] = useState<HoldingsCashDisplay>("combined");
@@ -1426,18 +1505,6 @@ export function ComparisonWorkbench({
     if (!holdingsDisplayAnalysis) return null;
     return buildHoldingsDisplaySummary(holdingsDisplayAnalysis, holdingsWeightView);
   }, [holdingsDisplayAnalysis, holdingsWeightView]);
-  const leftComparisonSummary = useMemo(
-    () => analysis
-      ? buildHoldingsDisplaySummary(analysis, holdingsWeightView)
-      : null,
-    [analysis, holdingsWeightView],
-  );
-  const rightComparisonSummary = useMemo(
-    () => rightAnalysis
-      ? buildHoldingsDisplaySummary(rightAnalysis, holdingsWeightView)
-      : null,
-    [holdingsWeightView, rightAnalysis],
-  );
   const comparisonReady = Boolean(
     comparisonMode &&
       holdingsView === "holdings" &&
@@ -1661,7 +1728,7 @@ export function ComparisonWorkbench({
             onClick={() => setWorkspaceView("portfolio")}
           >
             <span className="nav-icon">Σ</span>
-            Portfolio Manager
+            Portfolio
           </button>
           <button
             className={`nav-item${workspaceView === "creator" ? " nav-item--active" : ""}`}
@@ -1708,7 +1775,7 @@ export function ComparisonWorkbench({
             {workspaceView === "compare"
               ? "Holdings deep dive"
               : workspaceView === "portfolio"
-                ? "Portfolio analytics"
+                ? "Portfolio"
                 : workspaceView === "creator"
                   ? "ETF Creator"
                   : workspaceView === "ai" ? "AI analysis" : "Metrics overview"}
@@ -1760,7 +1827,7 @@ export function ComparisonWorkbench({
               className={workspaceView === "portfolio" ? "is-active" : ""}
               onClick={() => setWorkspaceView("portfolio")}
             >
-              Portfolio Manager
+              Portfolio
             </button>
             <button
               type="button"
@@ -1879,186 +1946,89 @@ export function ComparisonWorkbench({
 
               {analysis ? (
                 <>
-                  <section className="holdings-view-switch panel">
-                    <div>
-                      <span className="eyebrow">Analysis view</span>
-                      <strong>
-                        {holdingsView === "holdings"
-                          ? "Portfolio composition"
-                          : "Free-float distortion"}
-                      </strong>
-                    </div>
-                    <div
-                      className="holdings-view-tabs"
-                      role="tablist"
-                      aria-label="Holdings analysis view"
-                    >
-                      <button
-                        id="holdings-overview-tab"
-                        type="button"
-                        role="tab"
-                        aria-selected={holdingsView === "holdings"}
-                        aria-controls="holdings-overview-panel"
-                        onClick={() => setHoldingsView("holdings")}
-                      >
-                        Holdings
-                      </button>
-                      <button
-                        id="distortion-details-tab"
-                        type="button"
-                        role="tab"
-                        aria-selected={holdingsView === "distortion"}
-                        aria-controls="distortion-details-panel"
-                        onClick={() => setHoldingsView("distortion")}
-                      >
-                        Distortion details
-                      </button>
-                    </div>
-                  </section>
-
                   {holdingsView === "holdings" ? (
                     <div
                       id="holdings-overview-panel"
-                      role="tabpanel"
-                      aria-labelledby="holdings-overview-tab"
+                      role="region"
+                      aria-label="Holdings"
                       className="holdings-subview"
                     >
-                      {comparisonReady ? (
-                        <section className="holdings-weight-control panel" aria-label="Comparison weight basis">
-                          <div>
-                            <span className="eyebrow">Comparison basis</span>
-                            <strong>
-                              {holdingsWeightView === "with-cash"
-                                ? "Portfolios normalized with cash"
-                                : "Securities normalized to 100%"}
-                            </strong>
-                            <small>
-                              {holdingsWeightView === "with-cash"
-                                ? "Cash is included in overlap, active sleeves, concentration and sector comparisons."
-                                : "Cash is shown in the summary figures but excluded from every comparison measure."}
-                            </small>
-                          </div>
-                          <div className="holdings-weight-toggle" role="group" aria-label="Comparison cash treatment">
-                            <button
-                              type="button"
-                              aria-pressed={holdingsWeightView === "securities"}
-                              disabled={loading}
-                              onClick={() => void changeHoldingsWeightView("securities")}
-                            >
-                              Securities only
-                            </button>
-                            <button
-                              type="button"
-                              aria-pressed={holdingsWeightView === "with-cash"}
-                              disabled={loading}
-                              onClick={() => void changeHoldingsWeightView("with-cash")}
-                            >
-                              Include cash
-                            </button>
+                      <section className="holdings-summary" aria-label="Holdings overview metrics">
+                        <section className="panel holdings-summary-group" aria-labelledby="holdings-structure-title">
+                          <h2 id="holdings-structure-title">Breadth & concentration</h2>
+                          <div className="holdings-summary-metrics">
+                            <MetricCard
+                              label="Holdings universe"
+                              value={comparisonReady && comparison
+                                ? <ComparisonPair left={comparison.left.holdingsCount} right={comparison.right.holdingsCount} />
+                                : `${analysis.holdingsCount}`}
+                              detail={comparisonReady && comparison
+                                ? <><ComparisonPair left={comparisonFundLabel(comparison, "left")} right={comparisonFundLabel(comparison, "right")} /> · {holdingsWeightView === "with-cash" ? "cash included" : "cash excluded"}</>
+                                : `${analysis.equityHoldingsCount} equity · ${analysis.cashHoldingsCount} cash-like`}
+                            />
+                            <MetricCard
+                              label="Top 10 concentration"
+                              value={comparisonReady && comparison
+                                ? <ComparisonPair left={formatPercent(comparison.left.top10Concentration, 1)} right={formatPercent(comparison.right.top10Concentration, 1)} />
+                                : formatPercent(holdingsDisplaySummary?.top10Concentration ?? 0, 1)}
+                              detail={comparisonReady
+                                ? <><ComparisonPair left={comparison ? comparisonFundLabel(comparison, "left") : "ETF A"} right={comparison ? comparisonFundLabel(comparison, "right") : "ETF B"} /> · {holdingsWeightView === "with-cash" ? "cash included" : "cash excluded"}</>
+                                : "Weight in the ten largest positions"}
+                            />
                           </div>
                         </section>
-                      ) : (
-                        <section className="holdings-weight-control panel" aria-label="Holdings weight display">
-                          <div>
-                            <span className="eyebrow">Weight basis</span>
-                            <strong>
-                              {holdingsWeightView === "with-cash"
-                                ? "Portfolio normalized with cash"
-                                : "Securities normalized to 100%"}
-                            </strong>
-                            <small>
-                              {holdingsWeightView === "with-cash"
-                                ? "Cash, money-market and collateral positions are included in the allocation."
-                                : "Cash-like positions are excluded and the remaining securities are rescaled to 100%."}
-                            </small>
+                        <section className="panel holdings-summary-group" aria-labelledby="holdings-positioning-title">
+                          <div className="holdings-summary-heading">
+                            <h2 id="holdings-positioning-title">Positioning vs ACWI</h2>
+                            <button ref={distortionDetailsLink} type="button" className="holdings-summary-details" onClick={() => setHoldingsView("distortion")} aria-label="Open distortion and market coverage details">Details <span aria-hidden="true">↗</span></button>
                           </div>
-                          <div className="holdings-weight-options">
-                          <div className="holdings-weight-toggle" role="group" aria-label="Cash treatment">
-                            <button
-                              type="button"
-                              aria-pressed={holdingsWeightView === "securities"}
-                              disabled={loading}
-                              onClick={() => void changeHoldingsWeightView("securities")}
-                            >
-                              Securities only
-                            </button>
-                            <button
-                              type="button"
-                              aria-pressed={holdingsWeightView === "with-cash"}
-                              disabled={loading}
-                              onClick={() => void changeHoldingsWeightView("with-cash")}
-                            >
-                              Include cash
-                            </button>
-                          </div>
-                            {holdingsWeightView === "with-cash" ? (
-                              <div className="holdings-cash-detail" role="group" aria-label="Cash grouping">
-                                <button type="button" aria-pressed={cashDisplay === "combined"} onClick={() => setCashDisplay("combined")}>
-                                  Combined
-                                </button>
-                                <button type="button" aria-pressed={cashDisplay === "positions"} onClick={() => setCashDisplay("positions")}>
-                                  Separate
-                                </button>
-                              </div>
-                            ) : null}
+                          <div className="holdings-summary-metrics">
+                            <MetricCard
+                              label="Weight distortion index"
+                              value={comparisonReady && rightAnalysis
+                                ? <ComparisonPair
+                                    left={analysis.distortion.score === null ? "—" : analysis.distortion.score.toFixed(1)}
+                                    right={rightAnalysis.distortion.score === null ? "—" : rightAnalysis.distortion.score.toFixed(1)}
+                                  />
+                                : analysis.distortion.score === null ? "—" : analysis.distortion.score.toFixed(1)}
+                              detail={comparisonReady && rightAnalysis
+                                ? <ComparisonPair left={analysis.etf.ticker} right={rightAnalysis.etf.ticker} />
+                                : `Top ${analysis.distortion.topCount} equity positions · ACWI free-float weights`}
+                            />
+                            <MetricCard
+                              label="Market Coverage"
+                              value={comparisonReady && rightAnalysis
+                                ? <ComparisonPair left={analysis.marketCoverage.score === null ? "—" : analysis.marketCoverage.score.toFixed(1)} right={rightAnalysis.marketCoverage.score === null ? "—" : rightAnalysis.marketCoverage.score.toFixed(1)} />
+                                : analysis.marketCoverage.score === null ? "—" : analysis.marketCoverage.score.toFixed(1)}
+                              detail={comparisonReady && rightAnalysis ? <ComparisonPair left={analysis.etf.ticker} right={rightAnalysis.etf.ticker} /> : "Full ACWI universe · 0 to 100"}
+                            />
                           </div>
                         </section>
-                      )}
-                      <section className="metric-grid holdings-metric-grid" aria-label="Holdings overview metrics">
-                        <MetricCard
-                          label="Weight distortion index"
-                          value={comparisonReady && rightAnalysis
-                            ? <ComparisonPair
-                                left={analysis.distortion.score === null ? "—" : analysis.distortion.score.toFixed(1)}
-                                right={rightAnalysis.distortion.score === null ? "—" : rightAnalysis.distortion.score.toFixed(1)}
-                              />
-                            : analysis.distortion.score === null ? "—" : analysis.distortion.score.toFixed(1)}
-                          detail={comparisonReady && rightAnalysis
-                            ? <ComparisonPair left={analysis.etf.ticker} right={rightAnalysis.etf.ticker} />
-                            : "Open Distortion details for the full breakdown"}
-                          tone={comparisonReady ? "neutral" : analysis.distortion.score !== null && analysis.distortion.score < 2 ? "positive" : "left"}
-                        />
-                        <MetricCard
-                          label="Holdings universe"
-                          value={comparisonReady && comparison
-                            ? <ComparisonPair left={comparison.left.holdingsCount} right={comparison.right.holdingsCount} />
-                            : `${analysis.holdingsCount}`}
-                          detail={comparisonReady && comparison
-                            ? <><ComparisonPair left={comparisonFundLabel(comparison, "left")} right={comparisonFundLabel(comparison, "right")} /> · {holdingsWeightView === "with-cash" ? "cash included" : "cash excluded"}</>
-                            : `${analysis.equityHoldingsCount} equity · ${analysis.cashHoldingsCount} cash-like`}
-                        />
-                        <MetricCard
-                          label="Cash & equivalents"
-                          value={comparisonReady && rightAnalysis
-                            ? <ComparisonPair left={formatPercent(analysis.cashWeight, 2)} right={formatPercent(rightAnalysis.cashWeight, 2)} />
-                            : formatPercent(analysis.cashWeight, 2)}
-                          detail={comparisonReady && rightAnalysis
-                            ? <><ComparisonPair left={analysis.etf.ticker} right={rightAnalysis.etf.ticker} /> · {holdingsWeightView === "with-cash" ? "included in comparison" : "excluded from comparison"}</>
-                            : `${analysis.cashHoldingsCount} source position${analysis.cashHoldingsCount === 1 ? "" : "s"} · ${holdingsWeightView === "with-cash" ? "included in view" : "excluded from view"}`}
-                          tone={analysis.cashWeight < 0 ? "negative" : analysis.cashWeight > 0 ? "positive" : "neutral"}
-                        />
-                        <MetricCard
-                          label="Top 10 concentration"
-                          value={comparisonReady && comparison
-                            ? <ComparisonPair left={formatPercent(comparison.left.top10Concentration, 1)} right={formatPercent(comparison.right.top10Concentration, 1)} />
-                            : formatPercent(holdingsDisplaySummary?.top10Concentration ?? 0, 1)}
-                          detail={comparisonReady
-                            ? <><ComparisonPair left={comparison ? comparisonFundLabel(comparison, "left") : "ETF A"} right={comparison ? comparisonFundLabel(comparison, "right") : "ETF B"} /> · {holdingsWeightView === "with-cash" ? "cash included" : "cash excluded"}</>
-                            : "Share held by the ten largest displayed positions"}
-                          tone={comparisonReady ? "neutral" : "right"}
-                        />
-                        <MetricCard
-                          label="Largest holding"
-                          value={comparisonReady
-                            ? <ComparisonPair left={leftComparisonSummary?.topPosition?.ticker ?? "—"} right={rightComparisonSummary?.topPosition?.ticker ?? "—"} />
-                            : holdingsDisplaySummary?.topPosition?.ticker ?? "—"}
-                          detail={comparisonReady
-                            ? <ComparisonPair
-                                left={`${comparison ? comparisonFundLabel(comparison, "left") : "ETF A"} ${formatPercent(leftComparisonSummary?.topPosition?.displayWeight ?? 0, 2)}`}
-                                right={`${comparison ? comparisonFundLabel(comparison, "right") : "ETF B"} ${formatPercent(rightComparisonSummary?.topPosition?.displayWeight ?? 0, 2)}`}
-                              />
-                            : holdingsDisplaySummary?.topPosition ? `${holdingsDisplaySummary.topPosition.name} · ${formatPercent(holdingsDisplaySummary.topPosition.displayWeight, 2)}` : "No positions"}
-                        />
+                        <section className="panel holdings-summary-group holdings-summary-group--cash" aria-labelledby="holdings-cash-title">
+                          <div className="holdings-summary-heading">
+                            <h2 id="holdings-cash-title">Cash & liquidity</h2>
+                            <button type="button" className="holdings-cash-toggle" role="switch" aria-checked={holdingsWeightView === "with-cash"} disabled={loading} onClick={() => void changeHoldingsWeightView(holdingsWeightView === "with-cash" ? "securities" : "with-cash")}>
+                              Include cash <span className="holdings-cash-toggle-track" aria-hidden="true" />
+                            </button>
+                          </div>
+                          <MetricCard
+                            label={<span className="holdings-cash-metric-label">
+                              <span>Cash & equivalents</span>
+                              {holdingsWeightView === "with-cash" && !comparisonReady ? (
+                                <select className="holdings-cash-grouping" aria-label="Cash grouping" value={cashDisplay} onChange={(event) => setCashDisplay(event.target.value as HoldingsCashDisplay)}>
+                                  <option value="combined">Combined</option>
+                                  <option value="positions">Separate</option>
+                                </select>
+                              ) : null}
+                            </span>}
+                            value={comparisonReady && rightAnalysis
+                              ? <ComparisonPair left={formatPercent(analysis.cashWeight, 2)} right={formatPercent(rightAnalysis.cashWeight, 2)} />
+                              : formatPercent(analysis.cashWeight, 2)}
+                            detail={comparisonReady && rightAnalysis
+                              ? <><ComparisonPair left={analysis.etf.ticker} right={rightAnalysis.etf.ticker} /> · {holdingsWeightView === "with-cash" ? "included in comparison" : "excluded from comparison"}</>
+                              : `${analysis.cashHoldingsCount} source position${analysis.cashHoldingsCount === 1 ? "" : "s"} · ${holdingsWeightView === "with-cash" ? "included in view" : "excluded from view"}`}
+                          />
+                        </section>
                       </section>
                       {!comparisonReady ? (
                         <>
@@ -2078,43 +2048,14 @@ export function ComparisonWorkbench({
                   ) : (
                     <div
                       id="distortion-details-panel"
-                      role="tabpanel"
-                      aria-labelledby="distortion-details-tab"
+                      role="region"
+                      aria-label="Distortion details"
                       className="holdings-subview"
                     >
-                      {analysis.distortion.coverageStatus !== "complete" ? (
-                        <div className="alert holdings-distortion-alert">
-                          Distortion coverage is {analysis.distortion.coverageWeight.toFixed(1)}%:
-                          {" "}{analysis.distortion.missingHoldings} equity holding{analysis.distortion.missingHoldings === 1 ? " is" : "s are"} absent from the current ACWI universe. The score is calculated only on common securities and renormalized to 100%.
-                        </div>
-                      ) : null}
-                      <section className="metric-grid" aria-label="Distortion metrics">
-                        <MetricCard
-                          label="Weight distortion index"
-                          value={analysis.distortion.score === null ? "—" : analysis.distortion.score.toFixed(1)}
-                          detail="1 point = 1% of weight to reallocate · 0 to 100"
-                          tone={analysis.distortion.score !== null && analysis.distortion.score < 2 ? "positive" : "left"}
-                        />
-                        <MetricCard
-                          label="ACWI coverage"
-                          value={formatPercent(analysis.distortion.coverageWeight, 1)}
-                          detail={`${analysis.distortion.coveredHoldings} of ${analysis.distortion.eligibleHoldings} equity holdings`}
-                          tone={analysis.distortion.coverageStatus === "complete" ? "positive" : "neutral"}
-                        />
-                        <MetricCard
-                          label="Common equity holdings"
-                          value={`${analysis.distortion.coveredHoldings}`}
-                          detail="Positions used in both distributions"
-                        />
-                        <MetricCard
-                          label="Outside ACWI"
-                          value={`${analysis.distortion.missingHoldings}`}
-                          detail="Equity positions excluded from the score"
-                          tone={analysis.distortion.missingHoldings === 0 ? "positive" : "right"}
-                        />
-                      </section>
-                      <HoldingsDistortionPanel analysis={analysis} />
-                      <DistortionPositionsTable analysis={analysis} />
+                      <button ref={holdingsReturnLink} type="button" className="holdings-summary-details holdings-details-back" onClick={() => setHoldingsView("holdings")}>
+                        <span aria-hidden="true">←</span> Back to holdings
+                      </button>
+                      <HoldingsDistortionDetails key={analysis.etf.id} analysis={analysis} />
                     </div>
                   )}
                 </>

@@ -8,11 +8,12 @@ import type { EtfVisibility } from "@/domain/visibility";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { CatalogGroup, EtfShareClass } from "@/domain/etf";
-import type { LocalEtfDetail } from "@/domain/local-etf";
+import type { LocalEtfDetail, LocalPortfolioEtfDetail } from "@/domain/local-etf";
 import { mergeCashPosition } from "@/domain/processors/merge-cash-position";
 import { mergePortfolioPosition } from "@/domain/processors/merge-portfolio-position";
 import {
   SUPPORTED_CASH_CURRENCIES,
+  MAX_PORTFOLIO_ITEMS,
   type PortfolioCashPosition,
   type PortfolioExposureMode,
   type FxRate,
@@ -24,6 +25,13 @@ import {
 } from "@/domain/portfolio";
 import { EtfSearch } from "./etf-search";
 import { ManualRefreshButton } from "./manual-refresh-button";
+import { PortfolioOverview } from "./portfolio-overview";
+import { PortfolioValueHistory } from "./portfolio-value-history";
+import { PortfolioEvents } from "./portfolio-events";
+import { MetricCard } from "./metric-card";
+import { PortfolioAllocationPanels } from "./portfolio-allocation-panels";
+import { PortfolioCloneBuilder } from "./portfolio-clone-builder";
+import type { HoldingsCashDisplay } from "@/domain/holdings-cash-display";
 
 interface PortfolioAnalyticsProps {
   publicationEnabled: boolean;
@@ -49,12 +57,16 @@ interface CompositionRow {
   name: string;
   quoteSecurityId?: string;
   quoteTicker?: string;
+  sector: string;
+  country: string;
   weight: number;
   valueUsd: number;
   sources: Array<{ id: string; label: string; weight: number }>;
 }
 
 type PortfolioDisplayCurrency = "USD" | "EUR";
+const COMPOSITION_INITIAL_COUNT = 10;
+const COMPOSITION_LOAD_MORE_COUNT = 30;
 
 function formatPercent(value: number, digits = 2) {
   return `${value.toFixed(digits)}%`;
@@ -121,6 +133,8 @@ export function PortfolioAnalytics({
     [catalog],
   );
   const [workflowMode, setWorkflowMode] = useState<"create" | "edit">("create");
+  const [panelView, setPanelView] = useState<"overview" | "view" | "editor">("overview");
+  const isEditor = panelView === "editor";
   const [editingEtfId, setEditingEtfId] = useState("");
   const [definitionLoading, setDefinitionLoading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -148,12 +162,15 @@ export function PortfolioAnalytics({
   const [cashAmount, setCashAmount] = useState("1000");
   const [exposureMode, setExposureMode] =
     useState<PortfolioExposureMode>("gross-normalized");
+  const [cashDisplay, setCashDisplay] = useState<HoldingsCashDisplay>("combined");
+  const [compositionVisibleCount, setCompositionVisibleCount] = useState(COMPOSITION_INITIAL_COUNT);
   const [quote, setQuote] = useState<MarketPrice | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [resultFilter, setResultFilter] = useState("");
   const [searching, setSearching] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [cloning, setCloning] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [savingEtf, setSavingEtf] = useState(false);
   const [savedEtf, setSavedEtf] = useState<EtfShareClass | null>(null);
@@ -163,6 +180,7 @@ export function PortfolioAnalytics({
   const [visibility, setVisibility] = useState<EtfVisibility>("private");
   const [error, setError] = useState<string | null>(null);
   const definitionRequestId = useRef(0);
+  const [savedDefinition, setSavedDefinition] = useState<LocalPortfolioEtfDetail | null>(null);
 
   const applyPortfolioRecord = (record: PortfolioRecord) => {
     setPortfolio(record);
@@ -173,50 +191,85 @@ export function PortfolioAnalytics({
   const startCreateMode = () => {
     definitionRequestId.current += 1;
     setWorkflowMode("create");
+    setPanelView("editor");
+    setSavedDefinition(null);
     setEditingEtfId("");
     setDefinitionLoading(false);
     setConfirmDelete(false);
     setItems([]);
     setCashPositions([]);
     setPortfolio(null);
+    setCloning(false);
     setCompositionPrices({});
     setCompositionPricesLoading(false);
     setResultFilter("");
+    setCompositionVisibleCount(COMPOSITION_INITIAL_COUNT);
     setEtfTicker("");
-    setEtfName("My Portfolio ETF");
+    setEtfName("My Portfolio");
     setEtfDescription("");
     setVisibility("private");
     setSavedEtf(null);
     setError(null);
   };
 
-  const loadEditablePortfolioEtf = async (etfId: string) => {
+  const showOverview = () => {
+    definitionRequestId.current += 1;
+    setPanelView("overview");
+    setDefinitionLoading(false);
+    setConfirmDelete(false);
+    setError(null);
+    setPortfolio(null);
+    setItems([]);
+    setCashPositions([]);
+    setCompositionPrices({});
+  };
+
+  const loadEditablePortfolioEtf = async (
+    etfId: string,
+    detail?: LocalPortfolioEtfDetail,
+    forceRefresh = false,
+  ) => {
     if (!etfId) return;
     const requestId = ++definitionRequestId.current;
+    setPanelView("view");
+    setEditingEtfId(etfId);
+    setWorkflowMode("edit");
+    setPortfolio(null);
+    setItems([]);
+    setCashPositions([]);
+    setCompositionPrices({});
+    setCompositionPricesLoading(false);
+    setResultFilter("");
+    setCompositionVisibleCount(COMPOSITION_INITIAL_COUNT);
     setDefinitionLoading(true);
     setError(null);
     setSavedEtf(null);
     setConfirmDelete(false);
     try {
-      const response = await fetch(
-        `/api/v1/local-etfs/${encodeURIComponent(etfId)}`,
-        { cache: "no-store" },
-      );
-      const payload = (await response.json()) as {
-        data?: LocalEtfDetail;
-        error?: string;
-      };
-      if (!response.ok || !payload.data || payload.data.kind !== "portfolio") {
-        throw new Error(payload.error ?? "The portfolio ETF could not be loaded.");
+      let loaded = detail;
+      if (!loaded) {
+        const response = await fetch(
+          `/api/v1/local-etfs/${encodeURIComponent(etfId)}${forceRefresh ? "?refresh=true" : ""}`,
+          { cache: "no-store" },
+        );
+        const payload = (await response.json()) as {
+          data?: LocalEtfDetail;
+          error?: string;
+        };
+        if (!response.ok || payload.data?.kind !== "portfolio") {
+          throw new Error(payload.error ?? "The portfolio could not be loaded.");
+        }
+        loaded = payload.data;
       }
       if (requestId !== definitionRequestId.current) return;
+      setSavedDefinition(loaded);
       setWorkflowMode("edit");
-      setEditingEtfId(payload.data.etf.id);
-      setEtfTicker(payload.data.etf.ticker);
-      setEtfName(payload.data.etf.name);
-      setEtfDescription(payload.data.editableDescription);
-      setVisibility(payload.data.etf.visibility ?? "private");
-      applyPortfolioRecord(payload.data.portfolio);
+      setEditingEtfId(loaded.etf.id);
+      setEtfTicker(loaded.etf.ticker);
+      setEtfName(loaded.etf.name);
+      setEtfDescription(loaded.editableDescription);
+      setVisibility(loaded.etf.visibility ?? "private");
+      applyPortfolioRecord(loaded.portfolio);
     } catch (loadError) {
       if (requestId !== definitionRequestId.current) return;
       setError(
@@ -229,6 +282,22 @@ export function PortfolioAnalytics({
         setDefinitionLoading(false);
       }
     }
+  };
+
+  const cancelEditing = () => {
+    const definition = savedDefinition;
+    if (workflowMode === "create" || !definition) {
+      showOverview();
+      return;
+    }
+    applyPortfolioRecord(definition.portfolio);
+    setEtfTicker(definition.etf.ticker);
+    setEtfName(definition.etf.name);
+    setEtfDescription(definition.editableDescription);
+    setVisibility(definition.etf.visibility ?? "private");
+    setConfirmDelete(false);
+    setError(null);
+    setPanelView("view");
   };
 
   const deleteEditingPortfolioEtf = async () => {
@@ -249,7 +318,7 @@ export function PortfolioAnalytics({
         throw new Error(payload.error ?? "The portfolio ETF could not be deleted.");
       }
       await onCatalogChanged();
-      startCreateMode();
+      showOverview();
     } catch (deleteError) {
       setError(
         deleteError instanceof Error
@@ -263,7 +332,7 @@ export function PortfolioAnalytics({
 
   useEffect(() => {
     if (
-      kind !== "security" ||
+      !isEditor || kind !== "security" ||
       query.trim().length < 2 ||
       selectedSecurity
     ) return;
@@ -302,7 +371,7 @@ export function PortfolioAnalytics({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [kind, query, selectedSecurity]);
+  }, [isEditor, kind, query, selectedSecurity]);
 
   const selectedEtf =
     kind === "etf"
@@ -315,7 +384,7 @@ export function PortfolioAnalytics({
     kind === "etf" ? selectedEtfId : selectedSecurity?.securityId;
 
   useEffect(() => {
-    if (!selectedReferenceId) return;
+    if (!isEditor || !selectedReferenceId) return;
     const controller = new AbortController();
     queueMicrotask(() => {
       if (!controller.signal.aborted) {
@@ -351,7 +420,7 @@ export function PortfolioAnalytics({
       }
     })();
     return () => controller.abort();
-  }, [kind, selectedReferenceId]);
+  }, [isEditor, kind, selectedReferenceId]);
   const activeQuote =
     quote?.assetKind === kind && quote.assetId === selectedReferenceId
       ? quote
@@ -429,6 +498,7 @@ export function PortfolioAnalytics({
           (item.quantity ?? 0) * (item.currentPriceUsd ?? 0);
         return {
           ...item,
+          valueAvailable: item.currentValueUsd !== undefined || item.currentPriceUsd !== undefined,
           currentValueUsd,
           allocationWeight:
             draftMarketValue > 0 ? (currentValueUsd / draftMarketValue) * 100 : 0,
@@ -436,7 +506,12 @@ export function PortfolioAnalytics({
       }),
     [items, draftMarketValue],
   );
-  const hasUnsavedChanges =
+  const hasUnsavedChanges = (workflowMode === "edit" && savedDefinition !== null && (
+    etfTicker !== savedDefinition.etf.ticker ||
+    etfName !== savedDefinition.etf.name ||
+    etfDescription !== savedDefinition.editableDescription ||
+    visibility !== (savedDefinition.etf.visibility ?? "private")
+  )) ||
     JSON.stringify({
       items:
       normalizedItems.map(({ id, kind: itemKind, referenceId, quantity }) => ({
@@ -542,11 +617,11 @@ export function PortfolioAnalytics({
   const save = async (forceRefresh = false) => {
     if (normalizedItems.some((item) => !item.quantity || !Number.isFinite(item.quantity))) {
       setError("Every security line must have a non-zero share quantity.");
-      return;
+      return false;
     }
     if (cashPositions.some((position) => !position.amount || !Number.isFinite(position.amount))) {
       setError("Every cash line must have a non-zero amount.");
-      return;
+      return false;
     }
 
     if (forceRefresh) setRefreshing(true);
@@ -594,15 +669,18 @@ export function PortfolioAnalytics({
       if (isEditing) {
         await onCatalogChanged();
         await loadEditablePortfolioEtf(editingEtfId);
+        setSavedEtf(payload.data as EtfShareClass);
       } else {
         applyPortfolioRecord(payload.data as PortfolioRecord);
       }
+      return true;
     } catch (saveError) {
       setError(
         saveError instanceof Error
           ? saveError.message
           : "The portfolio could not be saved.",
       );
+      return false;
     } finally {
       if (forceRefresh) setRefreshing(false);
       else setSaving(false);
@@ -611,44 +689,25 @@ export function PortfolioAnalytics({
 
   const saveAsEtf = async () => {
     const isEditing = workflowMode === "edit" && editingEtfId;
-    if (!isEditing && hasUnsavedChanges) {
-      setError("Save and analyse the portfolio before creating its ETF.");
+    if (isEditing) {
+      await save();
       return;
     }
     setSavingEtf(true);
     setSavedEtf(null);
     setError(null);
     try {
+      if ((!portfolio || hasUnsavedChanges) && !await save()) return;
       const response = await fetch(
-        isEditing
-          ? `/api/v1/local-etfs/${encodeURIComponent(editingEtfId)}`
-          : "/api/v1/portfolio/save-as-etf",
+        "/api/v1/portfolio/save-as-etf",
         {
-        method: isEditing ? "PATCH" : "POST",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ticker: etfTicker,
           name: etfName,
           description: etfDescription,
           visibility,
-          ...(isEditing
-            ? {
-                kind: "portfolio",
-                items: normalizedItems.map(
-                  ({ id, kind: itemKind, referenceId, quantity }) => ({
-                    id,
-                    kind: itemKind,
-                    referenceId,
-                    inputMode: "shares",
-                    inputAmount: quantity,
-                  }),
-                ),
-                cashPositions: cashPositions.map(({ currency, amount }) => ({
-                  currency,
-                  amount,
-                })),
-              }
-            : {}),
         }),
       });
       const payload = (await response.json()) as {
@@ -660,12 +719,8 @@ export function PortfolioAnalytics({
       }
       setSavedEtf(payload.data);
       await onCatalogChanged();
-      if (isEditing) {
-        await loadEditablePortfolioEtf(payload.data.id);
-        setSavedEtf(payload.data);
-      } else {
-        setEtfTicker("");
-      }
+      await loadEditablePortfolioEtf(payload.data.id);
+      setSavedEtf(payload.data);
     } catch (saveError) {
       setError(
         saveError instanceof Error
@@ -689,6 +744,8 @@ export function PortfolioAnalytics({
       kind: "security",
       ticker: position.ticker,
       name: position.name,
+      sector: position.sector,
+      country: position.country,
       quoteSecurityId: position.quoteSecurityId,
       quoteTicker: position.quoteTicker,
       weight: position.weight * scale,
@@ -705,12 +762,14 @@ export function PortfolioAnalytics({
           id: `cash:${position.currency}`,
           kind: "cash",
           ticker: position.currency,
-          name: "Cash & cash equivalents",
+          name: `${position.currency} ${position.amount < 0 ? "borrowing" : "cash"}`,
+          sector: "Cash & equivalents",
+          country: "Not applicable",
           weight: position.weight ?? 0,
           valueUsd: position.valueUsd ?? netAssetValueUsd * (position.weight ?? 0) / 100,
           sources: [{
             id: `cash:${position.currency}`,
-            label: position.amount < 0 ? "Borrowed cash" : "Cash",
+            label: `${position.currency} ${position.amount < 0 ? "borrowing" : "cash"}`,
             weight: position.weight ?? 0,
           }],
         });
@@ -721,6 +780,8 @@ export function PortfolioAnalytics({
           kind: "financing",
           ticker: "FIN",
           name: "Implicit leveraged-ETF financing",
+          sector: "Cash & equivalents",
+          country: "Not applicable",
           weight: analysis.financingWeight,
           valueUsd: netAssetValueUsd * analysis.financingWeight / 100,
           sources: [{
@@ -730,9 +791,22 @@ export function PortfolioAnalytics({
           }],
         });
       }
+      if (cashDisplay === "combined") {
+        const cash = rows.filter((row) => row.kind !== "security");
+        if (cash.length > 0) {
+          const securities = rows.filter((row) => row.kind === "security");
+          rows.splice(0, rows.length, ...securities, {
+            id: "display:net-cash", kind: "cash", ticker: "CASH",
+            name: "Net cash (all positions)", sector: "Cash & equivalents", country: "Not applicable",
+            weight: cash.reduce((sum, row) => sum + row.weight, 0),
+            valueUsd: cash.reduce((sum, row) => sum + row.valueUsd, 0),
+            sources: cash.flatMap((row) => row.sources),
+          });
+        }
+      }
     }
     return rows.sort((left, right) => Math.abs(right.weight) - Math.abs(left.weight));
-  }, [draftMarketValue, portfolio, exposureMode]);
+  }, [draftMarketValue, portfolio, exposureMode, cashDisplay]);
 
   const filteredPositions = useMemo(() => {
     const normalizedFilter = resultFilter.trim().toLocaleUpperCase("en-US");
@@ -744,8 +818,8 @@ export function PortfolioAnalytics({
     );
   }, [compositionRows, resultFilter]);
   const visibleCompositionPositions = useMemo(
-    () => filteredPositions.slice(0, 30),
-    [filteredPositions],
+    () => filteredPositions.slice(0, compositionVisibleCount),
+    [filteredPositions, compositionVisibleCount],
   );
   const visibleSecurityQuotesKey = visibleCompositionPositions
     .filter((position) => position.kind === "security")
@@ -771,22 +845,24 @@ export function PortfolioAnalytics({
     });
     void (async () => {
       try {
-        const response = await fetch("/api/v1/prices/quotes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ quotes }),
-          signal: controller.signal,
-        });
-        const payload = (await response.json()) as {
-          data?: MarketPrice[];
-          error?: string;
-        };
-        if (!response.ok || !payload.data) {
-          throw new Error(payload.error ?? "Security prices are unavailable.");
-        }
+        // The quote API accepts up to 30 listings per request.
+        const batches = Array.from({ length: Math.ceil(quotes.length / 30) }, (_, index) => quotes.slice(index * 30, (index + 1) * 30));
+        const results = await Promise.allSettled(batches.map(async (batch) => {
+          const response = await fetch("/api/v1/prices/quotes", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ quotes: batch }),
+            signal: controller.signal,
+          });
+          const payload = (await response.json()) as { data?: MarketPrice[]; error?: string };
+          if (!response.ok || !payload.data) throw new Error(payload.error ?? "Security prices are unavailable.");
+          return payload.data;
+        }));
+        if (controller.signal.aborted) return;
+        const prices = results.flatMap((result) => result.status === "fulfilled" ? result.value : []);
         setCompositionPrices((current) => ({
           ...current,
-          ...Object.fromEntries(payload.data!.map((price) => [price.assetId, price])),
+          ...Object.fromEntries(prices.map((price) => [price.assetId, price])),
         }));
       } catch (priceError) {
         if (
@@ -807,21 +883,6 @@ export function PortfolioAnalytics({
     (maximum, position) => Math.max(maximum, Math.abs(position.weight)),
     0,
   );
-  const exposureScale =
-    exposureMode === "gross-normalized" && (analysis?.grossExposureWeight ?? 0) > 0
-      ? 100 / (analysis?.grossExposureWeight ?? 100)
-      : 1;
-  const displayedSectors = analysis
-    ? [
-        ...analysis.sectors.map((sector) => ({
-          ...sector,
-          weight: sector.weight * exposureScale,
-        })),
-        ...(exposureMode === "net-total" && Math.abs(analysis.cashWeight) > 0.000001
-          ? [{ sector: "Cash & financing", weight: analysis.cashWeight }]
-          : []),
-      ].sort((left, right) => Math.abs(right.weight) - Math.abs(left.weight))
-    : [];
   const displayedTop10 = compositionRows
     .slice(0, 10)
     .reduce((sum, position) => sum + Math.abs(position.weight), 0);
@@ -837,97 +898,55 @@ export function PortfolioAnalytics({
       ? previewQuantity * activeQuote.priceUsd
       : 0;
 
+  if (panelView === "overview") {
+    return <PortfolioOverview portfolios={portfolioEtfs} onCreate={startCreateMode} onSelect={(id, detail) => void loadEditablePortfolioEtf(id, detail)} />;
+  }
+
+  if (panelView === "view" && !portfolio) {
+    return (
+      <div className="portfolio-workspace" id="portfolio">
+        <div className="portfolio-navigation"><button type="button" className="secondary-button" onClick={showOverview}>← All portfolios</button></div>
+        <section className="panel portfolio-overview-empty" aria-live="polite" aria-busy={definitionLoading}>
+          <h1>{portfolioEtfs.find((etf) => etf.id === editingEtfId)?.name ?? "Portfolio"}</h1>
+          {definitionLoading ? <p><span className="spinner" /> Loading portfolio…</p> : <>
+            <p role="alert">{error ?? "The portfolio could not be loaded."}</p>
+            <button className="secondary-button" type="button" onClick={() => void loadEditablePortfolioEtf(editingEtfId)}>Retry</button>
+          </>}
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="portfolio-workspace" id="portfolio">
-      <section className="panel local-etf-workflow-switcher">
-        <div>
-          <span className="eyebrow">Portfolio ETF definition</span>
-          <h2>{workflowMode === "edit" ? "Edit an existing portfolio ETF" : "Create a new portfolio ETF"}</h2>
-          <p>
-            Editing reloads the saved ETF sleeves, stocks, cash balances and
-            share quantities into the same portfolio builder.
-          </p>
-        </div>
-        <div className="local-etf-workflow-controls">
-          <div className="local-etf-mode-toggle" aria-label="Portfolio ETF mode">
-            <button
-              type="button"
-              className={workflowMode === "create" ? "is-active" : ""}
-              onClick={startCreateMode}
-            >
-              Create new
-            </button>
-            <button
-              type="button"
-              className={workflowMode === "edit" ? "is-active" : ""}
-              disabled={portfolioEtfs.length === 0}
-              onClick={() => {
-                const nextId = editingEtfId || portfolioEtfs[0]?.id || "";
-                setWorkflowMode("edit");
-                setEditingEtfId(nextId);
-                if (nextId) void loadEditablePortfolioEtf(nextId);
-              }}
-            >
-              Edit existing
-            </button>
-          </div>
-          {workflowMode === "edit" ? (
-            <label className="local-etf-picker">
-              <span>Portfolio ETF</span>
-              <select
-                value={editingEtfId}
-                disabled={definitionLoading}
-                onChange={(event) =>
-                  void loadEditablePortfolioEtf(event.target.value)
-                }
-              >
-                {portfolioEtfs.map((etf) => (
-                  <option key={etf.id} value={etf.id}>
-                    {etf.ticker} · {etf.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          {workflowMode === "edit" ? (
-            <div className="local-etf-delete-control">
-              {confirmDelete ? <span>This removes the ETF and its saved portfolio.</span> : null}
-              <button
-                type="button"
-                className={confirmDelete ? "is-confirming" : ""}
-                disabled={definitionLoading}
-                onClick={() => void deleteEditingPortfolioEtf()}
-              >
-                {definitionLoading
-                  ? "Working…"
-                  : confirmDelete
-                    ? "Confirm delete"
-                    : "Delete ETF"}
-              </button>
-              {confirmDelete ? (
-                <button type="button" onClick={() => setConfirmDelete(false)}>
-                  Cancel
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </section>
-      <section className="portfolio-hero">
+      <div className="portfolio-navigation">
+        <button className="secondary-button" type="button" disabled={saving || savingEtf || refreshing || definitionLoading} onClick={isEditor ? cancelEditing : showOverview}>
+          <span aria-hidden="true">←</span> {isEditor ? "Cancel" : "All portfolios"}
+        </button>
+        {isEditor ? (
+          <span className="info-chip">{workflowMode === "edit" ? "Editing portfolio" : "New portfolio"}</span>
+        ) : (
+          <button className="primary-button" type="button" onClick={() => { setError(null); setSavedEtf(null); setPanelView("editor"); }}>
+            <span aria-hidden="true">✎</span> Edit portfolio
+          </button>
+        )}
+      </div>
+      <section className="metrics-hero holdings-hero panel portfolio-detail-hero">
         <div>
           <span className="eyebrow">Look-through aggregation</span>
-          <h1>Portfolio Analytics</h1>
+          <h1>{workflowMode === "edit" ? etfName : "Create a portfolio"}</h1>
           <p>
-            Combine ETF sleeves and supported individual stocks into one synthetic
-            portfolio, then see your true security-level ranking.
+            {isEditor
+              ? "Combine ETF positions, stocks and cash, then save your portfolio."
+              : etfDescription || "Your positions, cash balances and underlying exposure."}
           </p>
         </div>
         <div className="panel-refresh-actions">
           <div className="portfolio-total">
-            <span>Draft net asset value</span>
-            <strong>{displayedDraftMarketValue}</strong>
+            <span>{isEditor ? "Draft net asset value" : "Net asset value"}</span>
+            <strong>{!isEditor && portfolio?.priceError ? "Unavailable" : displayedDraftMarketValue}</strong>
             <small>
-              {items.length} priced position{items.length === 1 ? "" : "s"} ·{" "}
+              {items.length} position{items.length === 1 ? "" : "s"} ·{" "}
               {cashPositions.length} cash line{cashPositions.length === 1 ? "" : "s"}
             </small>
             <div
@@ -954,15 +973,17 @@ export function PortfolioAnalytics({
               </small>
             ) : null}
           </div>
-          <ManualRefreshButton
+          {!isEditor ? <ManualRefreshButton
             loading={refreshing}
-            disabled={saving || (items.length === 0 && cashPositions.length === 0)}
-            onRefresh={() => void save(true)}
-          />
+            disabled={saving || savingEtf || (items.length === 0 && cashPositions.length === 0)}
+            onRefresh={() => void loadEditablePortfolioEtf(editingEtfId, undefined, true)}
+          /> : null}
         </div>
       </section>
 
+      {!isEditor && portfolio ? <PortfolioValueHistory key={portfolio.id} portfolioId={portfolio.id} currency={displayCurrency} /> : null}
       {error ? <div className="alert alert--error">{error}</div> : null}
+      {!isEditor && savedEtf ? <div className="saved-etf-success" role="status">{savedEtf.name} was saved.</div> : null}
       {portfolio?.priceError ? (
         <div className="alert alert--error">{portfolio.priceError}</div>
       ) : null}
@@ -970,17 +991,24 @@ export function PortfolioAnalytics({
         <div className="alert alert--error">{portfolio.analysisError}</div>
       ) : null}
 
-      {publicationEnabled && <section className="panel publication-settings">
-              <VisibilitySelect value={visibility} onChange={setVisibility} etfId={workflowMode === "edit" ? editingEtfId : undefined} onSaved={onCatalogChanged} disabled={savingEtf || saving} />
+      {isEditor && publicationEnabled && <section className="panel publication-settings">
+              <VisibilitySelect value={visibility} onChange={setVisibility} disabled={savingEtf || saving} />
       </section>}
-      <section className="portfolio-builder-grid">
+      {isEditor && workflowMode === "create" ? <PortfolioCloneBuilder
+        catalog={catalog}
+        hasPositions={items.length > 0 || cashPositions.length > 0}
+        disabled={saving || savingEtf || refreshing}
+        onBusyChange={setCloning}
+        onApply={(result) => { applyPortfolioRecord(result.portfolio); setCompositionPrices({}); setCompositionVisibleCount(COMPOSITION_INITIAL_COUNT); setError(null); }}
+      /> : null}
+      {isEditor ? <section className="portfolio-builder-grid">
         <article className="panel portfolio-add-panel">
           <div className="panel-heading">
             <div>
               <span className="eyebrow">Step 1</span>
               <h2>Add a position</h2>
             </div>
-            <span className="info-chip">Max. 50 lines</span>
+            <span className="info-chip">Max. {MAX_PORTFOLIO_ITEMS.toLocaleString("en-US")} positions</span>
           </div>
 
           <div className="asset-kind-tabs" aria-label="Position type">
@@ -1324,364 +1352,238 @@ export function PortfolioAnalytics({
               {hasUnsavedChanges
                 ? "Unsaved portfolio changes"
                 : portfolio
-                  ? "Portfolio saved locally"
+                  ? portfolio.id === "clone-preview" ? "Draft allocation generated" : "Portfolio saved locally"
                   : "Ready to save"}
             </span>
-            <button
+            {workflowMode === "edit" ? <button
               className="primary-button"
               type="button"
-              disabled={saving || refreshing || (items.length === 0 && cashPositions.length === 0)}
+              disabled={saving || savingEtf || refreshing || (items.length === 0 && cashPositions.length === 0)}
               onClick={() => void save()}
             >
-              {saving ? <span className="spinner" /> : "Save & analyse"}
-            </button>
+              {saving ? <span className="spinner" /> : workflowMode === "edit" ? "Save changes" : "Save & analyse"}
+            </button> : null}
           </div>
         </article>
-      </section>
+      </section> : null}
 
+      {isEditor ? (
+        <section className="panel save-portfolio-etf-panel">
+          <div className="save-portfolio-etf-copy">
+            <span className="eyebrow">Portfolio details</span>
+            <h2>{workflowMode === "edit" ? "Portfolio identity" : "Save your portfolio"}</h2>
+            <p>
+              Give your portfolio a name and ticker. Positions and cash are valued
+              using the latest available prices.
+            </p>
+          </div>
+          <div className="save-portfolio-etf-form">
+            <div className="saved-etf-fields">
+              <label className="field">
+                <span>Local ticker</span>
+                <input
+                  value={etfTicker}
+                  maxLength={10}
+                  placeholder="MYETF"
+                  onChange={(event) =>
+                    setEtfTicker(event.target.value.toUpperCase())
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Portfolio name</span>
+                <input
+                  value={etfName}
+                  maxLength={80}
+                  onChange={(event) => setEtfName(event.target.value)}
+                />
+              </label>
+            </div>
+            <label className="field">
+              <span>Investment description (optional)</span>
+              <textarea
+                value={etfDescription}
+                maxLength={240}
+                placeholder="Purpose, strategy or investment role…"
+                onChange={(event) => setEtfDescription(event.target.value)}
+              />
+            </label>
+            <div className="save-etf-action">
+              <span>
+                {workflowMode === "edit"
+                  ? "Updates this portfolio in place."
+                  : "Creates a new saved portfolio."}
+              </span>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={
+                  savingEtf || saving || refreshing || cloning ||
+                  (items.length === 0 && cashPositions.length === 0)
+                }
+                onClick={saveAsEtf}
+              >
+                {savingEtf ? (
+                  <span className="spinner" />
+                ) : workflowMode === "edit" ? (
+                  "Save changes"
+                ) : (
+                  "Create portfolio"
+                )}
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+      {isEditor && workflowMode === "edit" ? (
+        <div className="local-etf-delete-control portfolio-delete-control">
+          {confirmDelete ? <span>This removes the portfolio and its saved positions.</span> : null}
+          <button type="button" className={confirmDelete ? "is-confirming" : ""} disabled={definitionLoading || saving || savingEtf || refreshing} onClick={() => void deleteEditingPortfolioEtf()}>
+            {confirmDelete ? "Confirm delete" : "Delete portfolio"}
+          </button>
+          {confirmDelete ? <button type="button" onClick={() => setConfirmDelete(false)}>Cancel</button> : null}
+        </div>
+      ) : null}
       <HoldingsSourceWarning issues={analysis?.sources.flatMap((source) => source.sourceIssues ?? [])} />
       {analysis ? (
         <>
-          <section className="panel portfolio-exposure-switch" aria-label="Composition display mode">
-            <div>
-              <span className="eyebrow">Composition basis</span>
-              <h2>
-                {exposureMode === "gross-normalized"
-                  ? "Equity exposure normalized to 100%"
-                  : "Total net exposure including cash"}
-              </h2>
-              <p>
-                {exposureMode === "gross-normalized"
-                  ? "Cash is hidden. Long and short look-through positions are scaled by gross absolute equity exposure."
-                  : "Every weight uses net asset value: cash, borrowing, long positions and shorts remain signed."}
-              </p>
-            </div>
-            <div className="exposure-mode-toggle" role="group" aria-label="Exposure basis">
-              <button
-                type="button"
-                className={exposureMode === "gross-normalized" ? "is-active" : ""}
-                aria-pressed={exposureMode === "gross-normalized"}
-                onClick={() => setExposureMode("gross-normalized")}
-              >
-                Equity normalized
-                <small>No cash · gross = 100%</small>
-              </button>
-              <button
-                type="button"
-                className={exposureMode === "net-total" ? "is-active" : ""}
-                aria-pressed={exposureMode === "net-total"}
-                onClick={() => setExposureMode("net-total")}
-              >
-                Total net exposure
-                <small>Cash included · signed weights</small>
-              </button>
-            </div>
-          </section>
-
-          <section className="portfolio-metrics" aria-label="Portfolio metrics">
-            <article>
-              <span>Net asset value</span>
-              <strong>
-                {formatPortfolioTotal(
-                  analysis.totalMarketValueUsd ?? draftMarketValue,
-                  displayCurrency,
-                  displayRateToUsd,
-                )}
-              </strong>
-              <small>positions + cash − borrowing</small>
-            </article>
-            <article>
-              <span>Gross equity exposure</span>
-              <strong>{formatPercent(analysis.grossExposureWeight)}</strong>
-              <small>sum of absolute look-through weights</small>
-            </article>
-            <article>
-              <span>Top 10 concentration</span>
-              <strong>{formatPercent(displayedTop10)}</strong>
-              <small>on the selected composition basis</small>
-            </article>
-            <article>
-              <span>Cash & financing</span>
-              <strong>{formatPercent(analysis.cashWeight)}</strong>
-              <small>
-                {formatPercent(analysis.explicitCashWeight)} explicit ·{" "}
-                {formatPercent(analysis.financingWeight)} ETF financing
-              </small>
-            </article>
-          </section>
-
-          <section className="panel save-portfolio-etf-panel">
-            <div className="save-portfolio-etf-copy">
-              <span className="eyebrow">Reusable local instrument</span>
-              <h2>{workflowMode === "edit" ? "Update this portfolio ETF" : "Save this portfolio as an ETF"}</h2>
-              <p>
-                Weightings Analytics stores the number of ETF and stock shares,
-                not frozen percentages or a frozen holdings list. Component weights are
-                recalculated from market prices, and ETF look-through is rebuilt
-                from the latest persisted source files whenever it is opened or
-                compared.
-              </p>
-              <div className="component-definition">
-                {normalizedItems.map((item) => (
-                  <span key={item.id}>
-                    <b>{formatQuantity(item.quantity ?? 0)} shares</b>{" "}
-                    {item.ticker}
-                    <small>
-                      {formatUsd(item.currentValueUsd ?? 0)} ·{" "}
-                      {formatPercent(item.allocationWeight)} now
-                    </small>
-                  </span>
-                ))}
-                {cashPositions.map((position) => (
-                  <span key={`cash:${position.currency}`}>
-                    <b>{formatQuantity(position.amount)} {position.currency}</b>{" "}
-                    {position.amount < 0 ? "borrowed cash" : "cash"}
-                    <small>
-                      {position.valueUsd !== undefined
-                        ? `${formatUsd(position.valueUsd)} · ${formatPercent(position.weight ?? 0)} now`
-                        : "valued at the latest FX rate"}
-                    </small>
-                  </span>
-                ))}
+          <section className="holdings-summary" aria-label="Portfolio overview metrics">
+            <section className="panel holdings-summary-group" aria-labelledby="portfolio-structure-title">
+              <h2 id="portfolio-structure-title">Breadth & concentration</h2>
+              <div className="holdings-summary-metrics">
+                <MetricCard label="Holdings universe" value={analysis.positionsCount} detail={`${analysis.etfSleevesCount} ETF sleeves · ${analysis.directPositionsCount} direct positions`} />
+                <MetricCard label="Top 10 concentration" value={formatPercent(displayedTop10, 1)} detail="Absolute weight in the ten largest positions" />
               </div>
-            </div>
-            <div className="save-portfolio-etf-form">
-              <div className="saved-etf-fields">
-                <label className="field">
-                  <span>Local ticker</span>
-                  <input
-                    value={etfTicker}
-                    maxLength={10}
-                    placeholder="MYETF"
-                    onChange={(event) =>
-                      setEtfTicker(event.target.value.toUpperCase())
-                    }
-                  />
-                </label>
-                <label className="field">
-                  <span>ETF name</span>
-                  <input
-                    value={etfName}
-                    maxLength={80}
-                    onChange={(event) => setEtfName(event.target.value)}
-                  />
-                </label>
+            </section>
+            <section className="panel holdings-summary-group" aria-labelledby="portfolio-exposure-title">
+              <h2 id="portfolio-exposure-title">Portfolio exposure</h2>
+              <div className="holdings-summary-metrics">
+                <MetricCard label="Gross securities exposure" value={formatPercent(analysis.grossExposureWeight, 1)} detail="Long and short exposures, in absolute value" />
+                <MetricCard label="Net securities exposure" value={formatPercent(analysis.netExposureWeight, 1)} detail="Long positions minus short positions" />
               </div>
-              <label className="field">
-                <span>Investment description (optional)</span>
-                <textarea
-                  value={etfDescription}
-                  maxLength={240}
-                  placeholder="Purpose, strategy or investment role…"
-                  onChange={(event) => setEtfDescription(event.target.value)}
-                />
-              </label>
-              <div className="save-etf-action">
-                <span>
-                  {workflowMode === "edit"
-                    ? "Updates the selected ETF in place."
-                    : hasUnsavedChanges
-                      ? "Save the latest changes first."
-                      : "Ready for the ETF catalog."}
-                </span>
-                <button
-                  className="primary-button"
-                  type="button"
-                  disabled={
-                    savingEtf ||
-                    (workflowMode !== "edit" && hasUnsavedChanges) ||
-                    (items.length === 0 && cashPositions.length === 0)
-                  }
-                  onClick={saveAsEtf}
-                >
-                  {savingEtf ? (
-                    <span className="spinner" />
-                  ) : workflowMode === "edit" ? (
-                    "Update ETF"
-                  ) : (
-                    "Save as ETF"
-                  )}
+            </section>
+            <section className="panel holdings-summary-group holdings-summary-group--cash" aria-labelledby="portfolio-cash-title">
+              <div className="holdings-summary-heading">
+                <h2 id="portfolio-cash-title">Cash & liquidity</h2>
+                <button type="button" className="holdings-cash-toggle" role="switch" aria-checked={exposureMode === "net-total"} onClick={() => setExposureMode(exposureMode === "net-total" ? "gross-normalized" : "net-total")}>
+                  Include cash <span className="holdings-cash-toggle-track" aria-hidden="true" />
                 </button>
               </div>
-              {savedEtf ? (
-                <div className="saved-etf-success">
-                  <strong>{savedEtf.ticker}</strong>{" "}
-                  {workflowMode === "edit"
-                    ? "was updated in Saved portfolios."
-                    : "is now available in ETF comparison under Saved portfolios."}
-                </div>
-              ) : null}
-            </div>
+              <MetricCard label={<span className="holdings-cash-metric-label"><span>Cash & equivalents</span>
+                {exposureMode === "net-total" ? <select className="holdings-cash-grouping" aria-label="Cash grouping" value={cashDisplay} onChange={(event) => setCashDisplay(event.target.value as HoldingsCashDisplay)}>
+                  <option value="combined">Combined</option><option value="positions">Separate</option>
+                </select> : null}
+              </span>} value={formatPercent(analysis.cashWeight, 2)} detail={<>
+                {formatPortfolioTotal((analysis.totalMarketValueUsd ?? draftMarketValue) * analysis.cashWeight / 100, displayCurrency, displayRateToUsd)} · {exposureMode === "net-total" ? "included in view" : "excluded from view"}<br />
+                {formatPercent(analysis.explicitCashWeight)} cash · {formatPercent(analysis.financingWeight)} ETF financing
+              </>} />
+            </section>
           </section>
+          <p className="holdings-method-copy portfolio-composition-basis" role="status">
+            {exposureMode === "net-total"
+              ? "Weights use net asset value, including cash and financing. Long positions, shorts and borrowing retain their signs."
+              : "Cash is excluded from allocations. Securities are normalized by gross absolute exposure to 100%; amounts remain actual portfolio exposure."}
+          </p>
 
-          <section className="portfolio-results-grid">
-            <article className="panel synthetic-etf-panel">
-              <div className="synthetic-etf-heading">
-                <div>
-                  <span className="eyebrow">Your synthetic ETF</span>
-                  <h2>Real portfolio composition</h2>
-                </div>
-                <label className="result-search">
-                  <span className="sr-only">Filter portfolio holdings</span>
-                  <input
-                    type="search"
-                    value={resultFilter}
-                    placeholder="Filter holdings"
-                    onChange={(event) => setResultFilter(event.target.value)}
-                  />
-                </label>
-              </div>
+          <PortfolioAllocationPanels positions={compositionRows} includeCash={exposureMode === "net-total"} formatValue={(value) => formatPortfolioTotal(value, displayCurrency, displayRateToUsd)} />
 
-              <div className="synthetic-ranking">
+          <div className={isEditor ? undefined : "portfolio-detail-columns"}>
+          <section className="panel portfolio-lookthrough-panel" aria-label="Underlying portfolio holdings">
+            <div className="panel-heading">
+              <div><span className="eyebrow">Look-through composition</span><h2>Underlying holdings</h2></div>
+              <span className="info-chip">{exposureMode === "net-total" ? "NAV weights · with cash" : "Gross normalized · securities"}</span>
+            </div>
+            <div className="holdings-table-search">
+              <label className="result-search"><span className="sr-only">Filter portfolio holdings</span><input type="search" value={resultFilter} placeholder="Filter holdings" onChange={(event) => { setResultFilter(event.target.value); setCompositionVisibleCount(COMPOSITION_INITIAL_COUNT); }} /></label>
+              <span className="holdings-table-search-count">{filteredPositions.length} of {compositionRows.length} holdings</span>
+            </div>
+            <div className="portfolio-composition-scroll" tabIndex={0} aria-label="Scrollable portfolio composition">
+              <div className="synthetic-ranking" id="portfolio-underlying-positions">
                 <div className="synthetic-ranking__header">
-                  <span>#</span>
-                  <span>Security</span>
-                  <span>Sources</span>
-                  <span title="Position value divided by the latest security price">Equivalent shares</span>
+                  <span>#</span><span>Security</span><span>Sources</span>
+                  <span title="Exposure divided by the latest security price">Equivalent shares</span>
                   <span>{exposureMode === "gross-normalized" ? "Normalized weight" : "NAV weight"}</span>
                 </div>
-                {visibleCompositionPositions.map((position) => {
-                  const rank =
-                    compositionRows.findIndex(
-                      (candidate) => candidate.id === position.id,
-                    ) + 1;
-                  return (
-                    <div className={`synthetic-ranking__row ${position.weight < 0 ? "is-negative" : ""}`} key={position.id}>
-                      <span className="synthetic-rank">{rank}</span>
-                      <div className="synthetic-security">
-                        <strong>{position.ticker}</strong>
-                        <span>{position.name}</span>
-                        <i aria-hidden="true">
-                          <b
-                            className={position.weight < 0 ? "is-negative" : ""}
-                            style={{
-                              width: `${
-                                maxPositionWeight > 0
-                                  ? (Math.abs(position.weight) / maxPositionWeight) * 100
-                                  : 0
-                              }%`,
-                            }}
-                          />
-                        </i>
-                      </div>
-                      <div className="contribution-list">
-                        {position.sources.map((source) => (
-                          <span key={source.id}>
-                            {source.label} {formatPercent(source.weight)}
-                          </span>
-                        ))}
-                      </div>
-                      <div
-                        className="synthetic-shares"
-                        title={`Position value divided by the latest Yahoo Finance price for ${position.quoteTicker ?? position.ticker}`}
-                      >
-                        {position.kind === "security" && compositionPrices[position.id]?.priceUsd ? (
-                          <>
-                            <span>
-                              {formatQuantity(
-                                position.valueUsd / compositionPrices[position.id].priceUsd,
-                              )}
-                            </span>
-                            <small>shares</small>
-                          </>
-                        ) : position.kind === "security" && compositionPricesLoading ? (
-                          <span aria-label="Loading equivalent shares">…</span>
-                        ) : (
-                          <span>—</span>
-                        )}
-                      </div>
-                      <strong className="synthetic-weight">
-                        <span>{formatPercent(position.weight)}</span>
-                        <small>
-                          {formatPortfolioTotal(
-                            position.valueUsd,
-                            displayCurrency,
-                            displayRateToUsd,
-                          )}
-                        </small>
-                      </strong>
+                {filteredPositions.length === 0 ? <p className="direct-only-note">No holdings match your search.</p> : null}
+                {visibleCompositionPositions.map((position) => (
+                  <div className={`synthetic-ranking__row ${position.weight < 0 ? "is-negative" : ""}`} key={position.id}>
+                    <span className="synthetic-rank">{compositionRows.findIndex((candidate) => candidate.id === position.id) + 1}</span>
+                    <div className="synthetic-security">
+                      <strong>{position.ticker}</strong>
+                      <span title={position.name}>{position.name}</span>
+                      <i aria-hidden="true"><b className={position.weight < 0 ? "is-negative" : ""} style={{ width: `${maxPositionWeight > 0 ? Math.abs(position.weight) / maxPositionWeight * 100 : 0}%` }} /></i>
                     </div>
-                  );
-                })}
+                    <div className="contribution-list">
+                      {position.sources.map((source) => <span key={source.id}>{source.label} {formatPercent(source.weight)}</span>)}
+                    </div>
+                    <div className="synthetic-shares" title={`Exposure divided by the latest security price for ${position.quoteTicker ?? position.ticker}`}>
+                      {position.kind === "security" && compositionPrices[position.id]?.priceUsd ? <>
+                        <span>{formatQuantity(position.valueUsd / compositionPrices[position.id].priceUsd)}</span><small>shares</small>
+                      </> : position.kind === "security" && compositionPricesLoading ? <span aria-label="Loading equivalent shares">…</span> : <span>—</span>}
+                    </div>
+                    <strong className="synthetic-weight"><span>{formatPercent(position.weight)}</span><small>{formatPortfolioTotal(position.valueUsd, displayCurrency, displayRateToUsd)}</small></strong>
+                  </div>
+                ))}
               </div>
-            </article>
-
-            <aside className="portfolio-side-panels">
-              <article className="panel sector-exposure-panel">
-                <div className="panel-heading">
-                  <div>
-                    <span className="eyebrow">Look-through allocation</span>
-                    <h2>Sector exposure</h2>
-                  </div>
-                </div>
-                <div className="sector-exposure-list">
-                  {displayedSectors.slice(0, 8).map((sector) => (
-                    <div key={sector.sector}>
-                      <span>{sector.sector}</span>
-                      <strong>{formatPercent(sector.weight)}</strong>
-                      <i aria-hidden="true">
-                        <b
-                          className={sector.weight < 0 ? "is-negative" : ""}
-                          style={{
-                            width: `${maxPositionWeight > 0
-                              ? Math.min(100, Math.abs(sector.weight))
-                              : 0}%`,
-                          }}
-                        />
-                      </i>
-                    </div>
-                  ))}
-                </div>
-              </article>
-
-              <article className="panel portfolio-sources-panel">
-                <div className="panel-heading">
-                  <div>
-                    <span className="eyebrow">Underlying files</span>
-                    <h2>ETF sources</h2>
-                  </div>
-                </div>
-                {analysis.sources.length > 0 ? (
-                  <div className="portfolio-source-list">
-                    {analysis.sources.map((source) => (
-                      <div key={source.referenceId}>
-                        <strong>{source.ticker}</strong>
-                        <span>as of {source.asOf}</span>
-                        <b>{source.sourceStatus}</b>
-                        {source.constituentCoverage ? (
-                          <small>
-                            Normalization used {source.constituentCoverage.used} of{" "}
-                            {source.constituentCoverage.total} configured constituents
-                            {source.constituentCoverage.missingTickers.length > 0
-                              ? `. Missing from the current ACWI snapshot: ${source.constituentCoverage.missingTickers.join(", ")}.`
-                              : "."}
-                          </small>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="direct-only-note">
-                    Direct-stock portfolio. No ETF file is required.
-                  </p>
-                )}
-              </article>
-            </aside>
+            </div>
+            <div className="portfolio-composition-actions">
+              {visibleCompositionPositions.length < filteredPositions.length ? <button type="button" className="position-table-toggle" aria-controls="portfolio-underlying-positions" onClick={() => setCompositionVisibleCount((count) => count + COMPOSITION_LOAD_MORE_COUNT)}><span>Show more holdings</span><small>{visibleCompositionPositions.length} of {filteredPositions.length} displayed</small><b aria-hidden="true">↓</b></button> : null}
+              {compositionVisibleCount > COMPOSITION_INITIAL_COUNT ? <button type="button" className="holdings-summary-details portfolio-composition-collapse" aria-controls="portfolio-underlying-positions" onClick={() => setCompositionVisibleCount(COMPOSITION_INITIAL_COUNT)}>Show fewer holdings ↑</button> : null}
+            </div>
           </section>
+          {!isEditor && portfolio ? <aside className="portfolio-events-sidebar" aria-label="Earnings calendar sidebar"><PortfolioEvents portfolio={portfolio} /></aside> : null}
+          </div>
+
+          <details className="panel portfolio-source-details">
+            <summary>ETF sources <span className="info-chip">{analysis.sources.length} files</span></summary>
+            {analysis.sources.length > 0 ? <div className="portfolio-source-list">
+              {analysis.sources.map((source) => <div key={source.referenceId}><strong>{source.ticker}</strong><span>as of {source.asOf}</span><b>{source.sourceStatus}</b>
+                {source.constituentCoverage ? <small>Normalization used {source.constituentCoverage.used} of {source.constituentCoverage.total} configured constituents{source.constituentCoverage.missingTickers.length > 0 ? `. Missing from the current ACWI snapshot: ${source.constituentCoverage.missingTickers.join(", ")}.` : "."}</small> : null}
+              </div>)}
+            </div> : <p className="direct-only-note">Direct-stock portfolio. No ETF file is required.</p>}
+          </details>
         </>
       ) : (
         <section className="panel portfolio-analysis-empty">
           <span className="portfolio-analysis-empty__icon">Σ</span>
           <div>
             <span className="eyebrow">Synthetic ETF output</span>
-            <h2>Save the portfolio to calculate its real composition</h2>
+            <h2>{isEditor ? "Save the portfolio to calculate its real composition" : "Portfolio analysis unavailable"}</h2>
             <p>
-              ETF holdings will be expanded and merged with direct positions.
-              Nothing is estimated when an official source is unavailable.
+              {isEditor
+                ? "ETF holdings will be expanded and merged with direct positions."
+                : "Refresh the portfolio to retry its underlying analysis. Your owned positions are shown below."}
             </p>
           </div>
         </section>
       )}
+      {!isEditor && !analysis && portfolio ? <aside className="portfolio-events-sidebar portfolio-events-sidebar--standalone" aria-label="Earnings calendar sidebar"><PortfolioEvents portfolio={portfolio} /></aside> : null}
+      {!isEditor ? (
+        <section className="panel portfolio-positions-panel" aria-label="Owned portfolio positions and cash">
+          <div className="panel-heading">
+            <div><span className="eyebrow">Owned positions</span><h2>Positions and cash</h2></div>
+            <div className="portfolio-position-legend"><span className="is-etf">ETF</span><span className="is-stock">Stock</span><span className="info-chip">{items.length + cashPositions.length} lines</span></div>
+          </div>
+          <div className="portfolio-position-bubbles">
+            {normalizedItems.map((item) => (
+              <article className={`portfolio-position-bubble portfolio-position-bubble--${item.kind}`} key={item.id}>
+                <div className="portfolio-position-bubble__heading"><strong title={item.name}>{item.ticker}</strong><span>{item.kind === "etf" ? "ETF" : "Stock"}{(item.quantity ?? 0) < 0 ? " · short" : ""}</span></div>
+                <span className="portfolio-position-bubble__name" title={item.name}>{item.name}</span>
+                <strong className="portfolio-position-bubble__value">{item.valueAvailable ? formatPortfolioTotal(item.currentValueUsd ?? 0, displayCurrency, displayRateToUsd) : "Unavailable"}</strong>
+                <div className="portfolio-position-bubble__details"><span>{formatQuantity(item.quantity ?? 0)} shares</span><b>{!portfolio?.priceError && item.valueAvailable ? formatPercent(item.allocationWeight) : "—"}</b></div>
+              </article>
+            ))}
+            {cashPositions.map((position) => (
+              <article className="portfolio-position-bubble portfolio-position-bubble--cash" key={position.currency}>
+                <div className="portfolio-position-bubble__heading"><strong>{position.currency}</strong><span>{position.amount < 0 ? "Borrowing" : "Cash"}</span></div>
+                <span className="portfolio-position-bubble__name">{position.amount < 0 ? "Borrowed cash" : "Cash & cash equivalents"}</span>
+                <strong className="portfolio-position-bubble__value">{position.valueUsd !== undefined ? formatPortfolioTotal(position.valueUsd, displayCurrency, displayRateToUsd) : "Unavailable"}</strong>
+                <div className="portfolio-position-bubble__details"><span>{formatQuantity(position.amount)} {position.currency}</span><b>{!portfolio?.priceError && draftMarketValue > 0 && position.valueUsd !== undefined ? formatPercent(position.valueUsd / draftMarketValue * 100) : "—"}</b></div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
     </div>
   );
 }

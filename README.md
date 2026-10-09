@@ -14,9 +14,29 @@ and creating reusable ETFs from iShares source universes.
 
 - Inspect one ETF or compare two ETFs by concentration, sector allocation,
   overlap, active sleeves, geography, and ACWI-implied weighting distortion.
+- Distortion defaults to the top 30 positive equity holdings, weighted against
+  an ACWI free-float counterfactual restricted to the same securities. In
+  Distortion details, adjust the top-holdings slider or select All holdings
+  (the original common-securities calculation). Market Coverage compares all
+  positive equity holdings against the entire ACWI equity universe, including
+  unheld benchmark securities and portfolio equities outside ACWI. Each score
+  is half the sum of absolute weight differences on distributions normalized
+  to 100%, expressed from 0 to 100; cash, non-equity assets and shorts are
+  excluded. Top and All holdings report unmatched equities as excluded from
+  the score. The Holdings summary always shows the default Top 30 score and
+  the full-ACWI Market Coverage score.
+  Distortion details separates overweights and underweights in two parallel
+  rankings: percentage-point gaps and relative weight multiples (double is
+  ×2, half is ÷2). Unheld ACWI securities display 0×; positions with no ACWI
+  weight appear only in the absolute ranking because their ratio is undefined.
 - Build long/short portfolios from ETFs and direct equities, including cash or
   borrowing in multiple currencies, then inspect gross or NAV exposure.
 - Save portfolios as local ETFs or create rule-based, free-float-weighted ETFs.
+- Initialize portfolios from snapshot copies of up to ten portfolios or ETFs:
+  choose a budget in a supported cash currency and allocate percentages to each
+  source. The clone merges underlying securities into fixed share quantities,
+  retains cash and financing, and creates no dependencies on source portfolios.
+  Previewing does not save the draft; use Create portfolio after reviewing it.
 - Inspect supported iShares/BlackRock ETFs and funds, and persist validated
   official holdings snapshots.
 - Enrich constituents with TradingView fundamentals and consensus EPS series.
@@ -170,6 +190,7 @@ share class. The endpoints are:
 - `GET /api/v1/compare?left=IVV&right=ACWI`
 - `GET|PUT /api/v1/portfolio`
 - `POST /api/v1/portfolio/save-as-etf`
+- `POST /api/v1/portfolio/clone` (owner-only allocation preview; no portfolio write)
 - `GET /api/v1/securities/search?q=AAPL`
 - `GET /api/v1/prices/quote?kind=etf&referenceId=ivv-us`
 - `POST /api/v1/prices/quotes`
@@ -179,17 +200,32 @@ share class. The endpoints are:
 - `PATCH /api/v1/local-etfs/:etfId/visibility` (owner only)
 - `GET /api/v1/published-portfolios/:etfId` (fully public portfolios only)
 - `GET /api/v1/metrics/overview?etfs=ivv-us,acwi-us`
+- `GET /api/v1/metrics/stock?securityId=US5949181045`
 
 Comparison excludes cash by default. Add `includeCash=true` to include it in
 weight normalization, overlap, and active-sleeve calculations. Metrics Overview
 accepts one to four distinct ETFs after reference resolution.
+
+Metrics also includes a **Single stock** sub-panel. Select an equity through
+the ACWI and supported-securities search to inspect all 20 company metrics,
+the eight quarterly EPS consensus observations, and the 4Q/2Q/1Q P/E paths.
+The stock endpoint reuses the ETF Screener and Estimates pipeline and its
+security-level caches, refreshing only the selected company. Direct stock
+ratios retain negative values; derived P/E and EPS growth require positive EPS.
+Observation capture dates and partial/stale provider states remain visible.
+Individual-stock requests also retrieve the next earnings report date in the
+same Screener call (`earnings_release_next_date` and listing `timezone`). The
+calendar has its own persisted daily cache, including unavailable dates, and
+is displayed in the listing timezone with its capture date and stale status.
+Scheduled dates can be estimated or revised by TradingView.
+Add `assetClass=equity` to security search to restrict results to equities.
 
 Portfolio and ETF editing routes require owner access, including their GET
 endpoints. Public catalog and analysis routes exclude private ETFs and personal
 amounts; exact published amounts use the dedicated published-portfolios route.
 
 Add `refresh=true` to holdings, holdings analysis, comparison, portfolio, single
-quote, or Metrics Overview requests to request fresh source data. Provider
+quote, or ETF/stock metrics requests to request fresh source data. Provider
 failures can still return stale fallback data. The FX endpoint has no refresh
 query option.
 
@@ -198,6 +234,39 @@ Batch listing quotes accept a JSON body with `quotes` entries containing `key`,
 Use canonical security IDs returned by the application. Request body contracts
 for writes are defined in `src/app/api/v1`; this is an endpoint index, not a
 complete API schema.
+
+## Daily portfolio value history
+
+Saved portfolios record their net value in USD and EUR by default. The portfolio
+detail page shows dated observations, period filters, the currency selector and
+a daily recording switch. Pausing retains existing history; each portfolio has
+its own persistent setting. EUR values use the EUR/USD rate captured with the
+observation, rather than today's rate applied to older dollar amounts.
+
+The local Node server checks on startup and every minute, without requiring an
+open browser. It forces a refresh of position prices and exchange rates before
+recording. The daily target is **16:10 America/New_York**, following US daylight
+saving time. A portfolio without history gets an initial observation; otherwise
+an observation is due after the daily target or whenever the latest capture is
+more than 24 hours old. A unique portfolio/date key limits recording to one
+observation per New York calendar day (including an initial or catch-up point
+taken before that day's normal target).
+
+Failed refreshes are retried after five minutes; stale fallback values are not
+saved as new observations. Weekends, holidays and early-close days retain the
+same daily target and use the latest available regular-market quotes. A capture
+records its actual timestamp and quote timestamps. The server cannot record
+while stopped: restarting resumes collection, leaving missed dates empty.
+The chart spaces observations by time and connects the saved points. Changes in
+net value include cash flows and edits to holdings; they are not a cash-flow
+adjusted investment return.
+
+SQLite migrations create `portfolio_value_snapshots` and
+`portfolio_history_settings` automatically. History stays in the local database
+and is included in normal database backups. The owner-only endpoint is
+`GET /api/v1/portfolio/history?portfolioId=...`; change recording with `PATCH`
+and a JSON body such as `{"enabled": false}`. Run `npm run test:portfolio-history`
+to verify scheduling, persistence, catch-up and retry behavior.
 
 ## Architecture
 

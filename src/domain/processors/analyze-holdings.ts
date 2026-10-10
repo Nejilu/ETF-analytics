@@ -94,7 +94,10 @@ export function analyzeHoldings(
   const positions: HoldingsAnalysisPosition[] = targetHoldings
     .map((holding) => {
       const quote = quoteReferences.get(holding.securityId);
-      const quoteIdentity = quote ? { quoteSecurityId: quote.securityId, quoteTicker: quote.ticker } : {};
+      const quoteIdentity = {
+        ...(quote ? { quoteSecurityId: quote.securityId, quoteTicker: quote.ticker } : {}),
+        ...(holding.adrPremiumPairId ? { adrPremiumPairId: holding.adrPremiumPairId } : {}),
+      };
       const equity = isEquity(holding);
       const cash = isCashHolding(holding);
       const reference = acwiBySecurity.get(holding.securityId);

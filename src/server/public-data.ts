@@ -188,6 +188,7 @@ export function publicAnalysis(
           ticker: item.ticker,
           name: item.name,
           kind: item.kind,
+          adrPremiumPairId: item.adrPremiumPairId ?? null,
           quantity: item.quantity,
           currentValueUsd: item.currentValueUsd,
           allocationWeight: item.allocationWeight,

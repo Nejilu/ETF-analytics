@@ -1,4 +1,5 @@
 import type { PortfolioHoldingsValuation } from "@/domain/portfolio-valuation";
+import { AdrPremiumBadge } from "./adr-premium-badge";
 
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const shares = new Intl.NumberFormat("en-US", { maximumFractionDigits: 6 });
@@ -30,7 +31,7 @@ export function PortfolioValuationPanel({
             <tbody>
               {valuation.items.map((item, index) => (
                 <tr key={`${item.ticker}-${index}`} className={item.allocationWeight < 0 ? "is-negative" : undefined}>
-                  <td><div className="security-cell"><div><strong>{item.ticker}</strong><span>{item.name} · {item.kind === "etf" ? "ETF sleeve" : "Direct security"}</span></div></div></td>
+                  <td><div className="security-cell"><div><strong className="security-ticker-with-premium"><span>{item.ticker}</span><AdrPremiumBadge security={item} /></strong><span>{item.name} · {item.kind === "etf" ? "ETF sleeve" : "Direct security"}</span></div></div></td>
                   <td>{item.allocationWeight.toFixed(2)}%</td>
                   <td>{formatPortfolioUsd(item.currentValueUsd)}</td>
                   <td>{item.quantity === null ? "—" : shares.format(item.quantity)} shares</td>

@@ -1,4 +1,5 @@
 import type { PortfolioCashPosition, PortfolioItem } from "./portfolio";
+import { adrPairForListing, type AdrPairId } from "./adr-premium";
 
 // Read-only valuation shared by the local analysis and the published view.
 // Keep editor IDs, initial values and input metadata out of this DTO.
@@ -8,6 +9,7 @@ export interface PortfolioHoldingsValuation {
     ticker: string;
     name: string;
     kind: "etf" | "security";
+    adrPremiumPairId?: AdrPairId | null;
     quantity: number | null;
     currentValueUsd: number | null;
     allocationWeight: number;
@@ -31,6 +33,7 @@ export function portfolioHoldingsValuation(
       ticker: item.ticker,
       name: item.name,
       kind: item.kind,
+      adrPremiumPairId: adrPairForListing(item)?.id ?? null,
       quantity: item.quantity ?? null,
       currentValueUsd: item.currentValueUsd ?? null,
       allocationWeight: item.allocationWeight,

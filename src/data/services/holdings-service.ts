@@ -189,6 +189,7 @@ async function buildPortfolioEtfSnapshot(
       ...canonicalAnalysis.positions.map((position) => ({
         securityId: position.securityId,
         ticker: position.ticker,
+        ...(position.adrPremiumPairId ? { adrPremiumPairId: position.adrPremiumPairId } : {}),
         name: position.name,
         sector: position.sector,
         assetClass: position.assetClass,

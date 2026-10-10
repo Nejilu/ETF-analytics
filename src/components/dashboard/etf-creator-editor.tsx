@@ -1,4 +1,5 @@
 "use client";
+import { AdrPremiumBadge } from "./adr-premium-badge";
 
 import { VisibilitySelect } from "./visibility-select";
 import type { EtfVisibility } from "@/domain/visibility";
@@ -1275,7 +1276,7 @@ export function EtfCreatorEditor({
                   }
                 />
                 <label className="creator-security" htmlFor={`creator-keep-${holding.securityId}`}>
-                  <strong>{holding.ticker}</strong>
+                  <strong className="security-ticker-with-premium"><span>{holding.ticker}</span><AdrPremiumBadge security={holding} /></strong>
                   <small>{holding.name}</small>
                   {!automaticIds.has(holding.securityId) &&
                   selectedIds.has(holding.securityId) ? (

@@ -220,6 +220,8 @@ export function findSecuritiesByIds(
           assetClass: row.assetClass ?? "Unclassified",
           country: row.country ?? "Not reported",
           isin: row.isin ?? undefined,
+          ...(identifiers.adrPremiumPairId === "tsmc" || identifiers.adrPremiumPairId === "sk-hynix"
+            ? { adrPremiumPairId: identifiers.adrPremiumPairId } : {}),
           exchange: typeof identifiers.exchange === "string"
             ? identifiers.exchange
             : undefined,

@@ -67,6 +67,7 @@ export interface PortfolioItem {
 }
 
 export interface PortfolioSecurity {
+  adrPremiumPairId?: import("./adr-premium").AdrPairId;
   securityId: string;
   ticker: string;
   name: string;

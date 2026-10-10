@@ -1,9 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type { AdrPairId } from "@/domain/adr-premium";
 import { countryToContinent, geographicCountryLabel } from "@/domain/geography";
 
 interface AllocationPosition {
+  adrPremiumPairId?: AdrPairId;
+  quoteTicker?: string;
   id: string;
   kind: "security" | "cash" | "financing";
   ticker: string;

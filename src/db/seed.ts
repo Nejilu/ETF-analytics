@@ -147,6 +147,7 @@ export function seedCatalog(): void {
           exchange: security.exchange,
           ...(security.cusip ? { cusip: security.cusip } : {}),
           ...(security.sedol ? { sedol: security.sedol } : {}),
+          ...(security.adrPremiumPairId ? { adrPremiumPairId: security.adrPremiumPairId } : {}),
         },
       };
       transaction

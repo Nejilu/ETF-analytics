@@ -81,6 +81,7 @@ export interface CatalogGroup extends Benchmark {
 }
 
 export interface Holding {
+  adrPremiumPairId?: import("./adr-premium").AdrPairId;
   securityId: string;
   ticker: string;
   name: string;
@@ -116,6 +117,7 @@ export interface HoldingsSnapshot {
 }
 
 export interface SleevePosition {
+  adrPremiumPairId?: import("./adr-premium").AdrPairId;
   securityId: string;
   ticker: string;
   name: string;
@@ -128,6 +130,7 @@ export interface SleevePosition {
 }
 
 export interface ImplicitSleevePosition {
+  adrPremiumPairId?: import("./adr-premium").AdrPairId;
   securityId: string;
   ticker: string;
   name: string;

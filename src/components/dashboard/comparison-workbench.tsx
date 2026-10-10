@@ -2,6 +2,7 @@
 
 import { HoldingsSourceWarning } from "./holdings-source-warning";
 import { MetricCard } from "./metric-card";
+import { AdrPremiumBadge } from "./adr-premium-badge";
 import { PortfolioValuationPanel, formatPortfolioUsd } from "./portfolio-valuation-panel";
 import { PortfolioEvents } from "./portfolio-events";
 import { portfolioPositionValueUsd } from "@/domain/portfolio-valuation";
@@ -776,7 +777,7 @@ function PositionRow({
         <div className="security-cell">
           <span className="security-avatar">{position.ticker.slice(0, 2)}</span>
           <div>
-            <strong>{position.ticker}</strong>
+            <strong className="security-ticker-with-premium"><span>{position.ticker}</span><AdrPremiumBadge security={position} /></strong>
             <span>{position.name}</span>
           </div>
         </div>
@@ -1163,7 +1164,7 @@ function DistortionPositionsTable({
                   <div className="security-cell">
                     <span className="security-avatar">{position.ticker.slice(0, 2)}</span>
                     <div>
-                      <strong>{position.ticker}</strong>
+                      <strong className="security-ticker-with-premium"><span>{position.ticker}</span><AdrPremiumBadge security={position} /></strong>
                       <span>{position.name} · {position.country}</span>
                     </div>
                   </div>
@@ -1360,7 +1361,7 @@ function HoldingsOverviewTable({
                       {position.ticker.slice(0, 2)}
                     </span>
                     <div>
-                      <strong>{position.ticker}</strong>
+                      <strong className="security-ticker-with-premium"><span>{position.ticker}</span><AdrPremiumBadge security={position} /></strong>
                       <span>{position.name}</span>
                     </div>
                   </div>

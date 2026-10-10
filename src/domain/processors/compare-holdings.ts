@@ -77,6 +77,7 @@ function buildImplicitSleeve(
             ticker: position.ticker,
             name: position.name,
             sector: position.sector,
+            ...(position.adrPremiumPairId ? { adrPremiumPairId: position.adrPremiumPairId } : {}),
             activeWeight: roundPositionWeight(position[activeWeightKey]),
             normalizedWeight: roundPositionWeight(
               (position[activeWeightKey] / normalizationBase) * 100,
@@ -155,6 +156,7 @@ export function compareHoldings(
         ticker: left?.ticker ?? right?.ticker ?? "—",
         name: left?.name ?? right?.name ?? "Unknown security",
         sector: left?.sector ?? right?.sector ?? "Unclassified",
+        ...((left?.adrPremiumPairId ?? right?.adrPremiumPairId) ? { adrPremiumPairId: left?.adrPremiumPairId ?? right?.adrPremiumPairId } : {}),
         leftWeight,
         overlapWeight,
         rightWeight,

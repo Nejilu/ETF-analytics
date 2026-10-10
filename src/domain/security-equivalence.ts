@@ -1,4 +1,5 @@
 import type { Holding } from "./etf";
+import { adrPairForListing } from "./adr-premium";
 
 type SecurityDescriptor = Pick<Holding, "securityId" | "ticker" | "name">;
 type QuoteDescriptor = Pick<Holding, "ticker" | "name">;
@@ -39,7 +40,7 @@ const ECONOMIC_GROUPS: EconomicSecurityGroup[] = [
     key: "sk-hynix",
     displayTicker: "HY9H / 000660",
     displayName: "SK HYNIX INC",
-    tickers: ["HY9H", "HY9H.F", "000660", "000660.KS"],
+    tickers: ["SKHY", "HY9H", "HY9H.F", "000660", "000660.KS"],
     nameIncludes: ["SK HYNIX"],
   },
   {
@@ -83,6 +84,14 @@ export function economicSecurityIdentity(
 export function securityQuoteAlias(
   security: QuoteDescriptor,
 ): SecurityQuoteAlias | undefined {
+  if (normalized(security.ticker) === "SKHY") {
+    return {
+      displayTicker: "SKHY",
+      providerSymbol: "SKHY",
+      instrumentType: "ADR",
+      underlyingTicker: "000660",
+    };
+  }
   const group = findEconomicGroup(security);
   if (group?.key === "taiwan-semiconductor") {
     return {
@@ -187,16 +196,19 @@ export function mergeEquivalentHoldings(
 
   for (const holding of holdings) {
     const identity = economicSecurityIdentity(holding);
+    const adrPair = adrPairForListing(holding);
     const existing = merged.get(identity.securityId);
     if (!existing) {
       merged.set(identity.securityId, {
         ...holding,
         ...identity,
+        ...(adrPair ? { adrPremiumPairId: adrPair.id } : {}),
       });
       continue;
     }
 
     existing.weight += holding.weight;
+    if (adrPair) existing.adrPremiumPairId = adrPair.id;
     existing.marketValue =
       existing.marketValue !== undefined &&
       holding.marketValue !== undefined

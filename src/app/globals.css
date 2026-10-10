@@ -1854,7 +1854,7 @@ tbody tr:hover {
 .portfolio-lookthrough-panel .holdings-table-search-count { font-size: 10px; }
 .portfolio-composition-scroll { overflow-x: auto; scrollbar-width: thin; }
 .portfolio-composition-scroll:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
-.portfolio-lookthrough-panel .synthetic-ranking { margin-top: 0; min-width: 670px; overflow: visible; }
+.portfolio-lookthrough-panel .synthetic-ranking { margin-top: 0; min-width: 600px; overflow: visible; }
 .portfolio-lookthrough-panel .synthetic-ranking__header,
 .portfolio-lookthrough-panel .synthetic-ranking__row {
   gap: 12px;
@@ -4760,6 +4760,93 @@ td.holdings-table-empty {
 .stock-company-heading h2 {
   font-size: 19px;
   margin: 5px 0;
+}
+
+.stock-adr-premium {
+  padding: 18px;
+}
+
+.security-ticker-with-premium.security-ticker-with-premium {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  max-width: 100%;
+}
+
+.security-ticker-with-premium.security-ticker-with-premium > span:first-child {
+  display: inline;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  overflow: visible;
+}
+
+.adr-premium-badge.adr-premium-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--purple) 28%, var(--line));
+  border-radius: 5px;
+  background: var(--purple-soft);
+  color: var(--purple);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.4;
+  vertical-align: middle;
+  white-space: nowrap;
+  flex-shrink: 0;
+  overflow: visible;
+  cursor: help;
+}
+
+.adr-premium-badge.adr-premium-badge .adr-premium-badge__symbol,
+.adr-premium-badge.adr-premium-badge .adr-premium-badge__date {
+  display: inline;
+  color: inherit;
+  font-size: 8px;
+  margin: 0;
+}
+
+.adr-premium-badge:focus-visible {
+  outline: 2px solid var(--purple);
+  outline-offset: 2px;
+}
+
+.adr-premium-badge--stale.adr-premium-badge--stale {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.stock-adr-premium .stock-captured-price strong {
+  color: var(--purple);
+  font-size: 30px;
+}
+
+.stock-adr-prices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 16px;
+  margin: 18px 0;
+}
+
+.stock-adr-prices dt,
+.stock-adr-prices small,
+.stock-adr-details {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.stock-adr-prices dd {
+  font-size: 19px;
+  font-weight: 600;
+  margin: 5px 0;
+}
+
+.stock-adr-details summary {
+  cursor: pointer;
 }
 
 .stock-captured-price {

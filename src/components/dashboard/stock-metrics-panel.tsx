@@ -18,6 +18,45 @@ interface StockSearchResult {
   country: string;
 }
 
+function StockAdrPremium({ result }: { result: StockMetricsResult }) {
+  const premium = result.adrPremium;
+  if (!premium) return null;
+  const { pair, observation } = premium;
+  const utcTime = (value: string) => new Intl.DateTimeFormat("en-GB", {
+    timeZone: "UTC", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+  }).format(new Date(value)) + " UTC";
+  const reason = premium.fallbackReason === "fx-unavailable"
+    ? "No FX quote within 15 minutes of the Asian close."
+    : "No traded US overnight quote within 5 minutes of the Asian close.";
+  return (
+    <section className="stock-adr-premium panel" aria-label="ADR premium">
+      <div className="metrics-feature-heading">
+        <div><span className="eyebrow">ADR premium</span><h2>{pair.adrSymbol.split(":")[1]} vs {pair.localSymbol.split(":")[1]}</h2></div>
+        <div className="stock-captured-price">
+          <strong>{observation ? `${observation.premiumPct >= 0 ? "+" : ""}${formatNumber(observation.premiumPct, 2)}%` : "Unavailable"}</strong>
+          <small>{observation ? observation.mode === "aligned" ? "At Asian close" : "Latest closing prices · different times" : "Price comparison unavailable"}</small>
+        </div>
+      </div>
+      {observation ? <>
+        <dl className="stock-adr-prices">
+          <div><dt>Asian share · {pair.localCurrency}</dt><dd>{formatNumber(observation.localPrice, 2)}</dd><small>Close · {utcTime(observation.localCloseAt)}</small></div>
+          <div><dt>US ADR · USD</dt><dd>{formatNumber(observation.adrPrice, 2)}</dd><small>{observation.mode === "aligned" ? "1-min bar ended" : "Regular close"} · {utcTime(observation.adrPriceAt)}</small></div>
+          <div><dt>Equivalent ADR value · USD</dt><dd>{formatNumber(observation.parityUsd, 2)}</dd><small>1 ADR = {pair.underlyingPerAdr} local {pair.underlyingPerAdr === 1 ? "share" : "shares"}</small></div>
+        </dl>
+        <p className="metrics-chart-note">{observation.mode === "aligned"
+          ? `US trade at most ${formatNumber((observation.adrMaxAgeSeconds ?? 0) / 60, 0)} min before the Asian close. Only bars completed by that time are used.`
+          : `${reason} Market moves between the two closes affect this figure.`}
+          {premium.sourceStatus === "stale" ? " Refresh unavailable: showing the previously captured comparison." : ""}</p>
+        <details className="stock-adr-details"><summary>Exchange rate and calculation</summary>
+          <p>1 USD = {formatNumber(observation.localCurrencyPerUsd, 4)} {pair.localCurrency} · 5-min FX bar ended {utcTime(observation.fxAt)}.</p>
+          <p>Premium = (US ADR price / equivalent ADR value − 1) × 100. Equivalent ADR value = Asian share price × shares per ADR / exchange rate.</p>
+          <p>TradingView · US overnight trades: Blue Ocean · FX: FX_IDC · {premium.sourceStatus} · captured {utcTime(premium.capturedAt)} · 15-min cache.</p>
+        </details>
+      </> : <p className="metrics-chart-note">The local price, US price or exchange rate is unavailable. Other company metrics remain available.</p>}
+    </section>
+  );
+}
+
 function StockMetricGroups({ result }: { result: StockMetricsResult }) {
   return (
     <section className="metrics-groups-panel panel" aria-label="Stock fundamentals">
@@ -224,6 +263,7 @@ export function StockMetricsPanel() {
       {loading ? <section className="metrics-loading panel" role="status"><span className="spinner" /><strong>Loading company fundamentals and consensus…</strong></section> : null}
       {result ? <>
         <section className="metrics-hero panel stock-company-heading"><div><span className="eyebrow">{result.observations.providerSymbol || "TradingView symbol unresolved"}</span><h2>{result.security.ticker} · {result.security.name}</h2><p>{result.security.sector} · {result.security.country} · {result.security.isin ?? result.security.securityId}</p></div>{result.observations.estimateSeries ? <div className="stock-captured-price"><strong>{formatNumber(result.observations.estimateSeries.price, 2)} {result.observations.estimateSeries.currency}</strong><small>Price captured with consensus</small></div> : null}</section>
+        <StockAdrPremium result={result} />
         <section className="metrics-freshness-panel panel" aria-label="Stock metrics source freshness">
           <div className="metrics-freshness-heading"><span className={`source-status source-status--${result.sourceStatus}`}>{result.sourceStatus}</span><strong>{result.source}</strong><small>{result.cacheTtlHours}h observation cache</small></div>
           <dl><div><dt>Calculated</dt><dd>{formatDateTime(result.calculatedAt)}</dd></div><div><dt>Fundamentals captured</dt><dd>{formatCaptureWindow(result.fundamentalsCaptureWindow)}</dd></div><div><dt>Consensus captured</dt><dd>{formatCaptureWindow(result.estimatesCaptureWindow)}</dd></div></dl>

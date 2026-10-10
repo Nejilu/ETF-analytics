@@ -37,6 +37,18 @@ const snapshot = {
   ],
 } as HoldingsSnapshot;
 
+test("SKHY carries its ADR premium but a GDR price override does not", () => {
+  const security: PortfolioSecurity = { ...apple, securityId: "US78392B2060", ticker: "SKHY",
+    name: "SK HYNIX INC SPONSORED ADR", adrPremiumPairId: "sk-hynix" };
+  const item: PortfolioItem = { id: "skhy", kind: "security", referenceId: security.securityId,
+    ticker: "SKHY", name: security.name, allocationWeight: 100, priceSymbol: "SKHY" };
+  const input = { items: [item], etfSnapshots: new Map(), directSecurities: new Map([[security.securityId, security]]) };
+  assert.equal(analyzePortfolioForDisplay(input).positions[0].adrPremiumPairId, "sk-hynix");
+  const overridden = analyzePortfolioForDisplay({ ...input, items: [{ ...item, priceSymbol: "HY9H.F" }] });
+  assert.equal(overridden.positions[0].adrPremiumPairId, undefined);
+  assert.equal(overridden.positions[0].weight, 100);
+});
+
 test("aggregates direct positions with their ETF look-through exposure", () => {
   const items: PortfolioItem[] = [
     {
@@ -420,6 +432,7 @@ test("uses the highest-weight listing as the quote reference for a grouped posit
   assert.equal(result.positions[0].ticker, "TSM / 2330");
   assert.equal(result.positions[0].quoteSecurityId, "tsmc-primary");
   assert.equal(result.positions[0].quoteTicker, "2330");
+  assert.equal(result.positions[0].adrPremiumPairId, "tsmc");
 });
 
 test("keeps a dominant direct depositary ticker over its canonical local listing", () => {
@@ -461,6 +474,7 @@ test("keeps a dominant direct depositary ticker over its canonical local listing
   assert.equal(result.positions.length, 1);
   assert.equal(result.positions[0].quoteSecurityId, "tsmc-primary");
   assert.equal(result.positions[0].quoteTicker, "TSM");
+  assert.equal(result.positions[0].adrPremiumPairId, "tsmc");
 });
 
 test("preserves leveraged ETF exposure above portfolio NAV", () => {

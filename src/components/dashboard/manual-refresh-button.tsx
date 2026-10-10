@@ -1,3 +1,5 @@
+import { adrPremiumStore } from "./adr-premium-store";
+
 interface ManualRefreshButtonProps {
   disabled?: boolean;
   loading: boolean;
@@ -16,7 +18,11 @@ export function ManualRefreshButton({
       disabled={disabled || loading}
       aria-label="Force refresh data"
       title="Bypass the server cache and request fresh provider data"
-      onClick={onRefresh}
+      onClick={() => {
+        // Start before the parent replaces its rows and unmounts their badges.
+        void adrPremiumStore.refreshIfLoaded();
+        onRefresh();
+      }}
     >
       <span className={loading ? "is-refreshing" : ""} aria-hidden="true">
         ↻

@@ -19,6 +19,7 @@ export type DistortionPositionStatus =
   | "non-equity";
 
 export interface HoldingsAnalysisPosition {
+  adrPremiumPairId?: import("./adr-premium").AdrPairId;
   securityId: string;
   quoteSecurityId?: string;
   quoteTicker?: string;

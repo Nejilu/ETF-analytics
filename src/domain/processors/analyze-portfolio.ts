@@ -7,6 +7,7 @@ import type {
   PortfolioSecurity,
 } from "../portfolio";
 import { economicSecurityIdentity } from "../security-equivalence";
+import { adrPairForListing } from "../adr-premium";
 import { normalizeHoldingWeights } from "./normalize-holding-weights";
 
 const EPSILON = 0.000001;
@@ -37,10 +38,12 @@ function addPosition(
   contribution: PortfolioContribution,
   resolveIdentity: PortfolioPositionIdentityResolver,
   quoteTicker = security.ticker,
+  priceSymbol?: string,
 ) {
   if (!Number.isFinite(weight) || Math.abs(weight) <= EPSILON) return;
 
   const identity = resolveIdentity(security);
+  const adrPair = adrPairForListing({ ...security, ticker: quoteTicker, priceSymbol });
   const candidates = quoteCandidates.get(identity.securityId) ?? new Map();
   const candidateKey = `${security.securityId}:${quoteTicker.toLocaleUpperCase("en-US")}`;
   const candidate = candidates.get(candidateKey);
@@ -57,6 +60,7 @@ function addPosition(
 
   const existing = positions.get(identity.securityId);
   if (existing) {
+    if (adrPair) existing.adrPremiumPairId = adrPair.id;
     existing.weight += weight;
     const source = existing.contributions.find(
       (item) => item.itemId === contribution.itemId,
@@ -72,6 +76,7 @@ function addPosition(
   positions.set(identity.securityId, {
     ...security,
     ...identity,
+    adrPremiumPairId: adrPair?.id,
     weight,
     contributions: [contribution],
   });
@@ -118,6 +123,7 @@ function analyzePortfolioWithIdentity({
         },
         resolveIdentity,
         item.ticker,
+        item.priceSymbol,
       );
       continue;
     }
@@ -152,6 +158,7 @@ function analyzePortfolioWithIdentity({
           sector: holding.sector,
           assetClass: holding.assetClass,
           country: holding.country,
+          ...(holding.adrPremiumPairId ? { adrPremiumPairId: holding.adrPremiumPairId } : {}),
         },
         weight,
         {

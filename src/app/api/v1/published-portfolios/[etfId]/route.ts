@@ -3,6 +3,7 @@ import { publicationCatalog, requirePublicEtf } from "@/server/public-data";
 import { AccessError } from "@/server/site-access";
 import { withSiteAccess } from "@/server/site-route";
 import type { PublishedPortfolio } from "@/domain/published-portfolio";
+import { adrPairForListing } from "@/domain/adr-premium";
 
 export const GET = withSiteAccess(
   async (
@@ -27,6 +28,8 @@ export const GET = withSiteAccess(
       items: portfolio.items.map((item) => ({
         ticker: item.ticker,
         name: item.name,
+        kind: item.kind,
+        adrPremiumPairId: adrPairForListing(item)?.id ?? null,
         quantity: item.quantity ?? null,
         currentValueUsd: item.currentValueUsd ?? null,
         allocationWeight: item.allocationWeight,

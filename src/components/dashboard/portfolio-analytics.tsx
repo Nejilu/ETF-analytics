@@ -1,4 +1,6 @@
 "use client";
+import { AdrPremiumBadge } from "./adr-premium-badge";
+import type { AdrPairId } from "@/domain/adr-premium";
 
 import { HoldingsSourceWarning } from "./holdings-source-warning";
 
@@ -51,6 +53,7 @@ interface SecuritySearchResult {
 }
 
 interface CompositionRow {
+  adrPremiumPairId?: AdrPairId;
   id: string;
   kind: "security" | "cash" | "financing";
   ticker: string;
@@ -748,6 +751,7 @@ export function PortfolioAnalytics({
       country: position.country,
       quoteSecurityId: position.quoteSecurityId,
       quoteTicker: position.quoteTicker,
+      adrPremiumPairId: position.adrPremiumPairId,
       weight: position.weight * scale,
       valueUsd: netAssetValueUsd * position.weight / 100,
       sources: position.contributions.map((contribution) => ({
@@ -1202,7 +1206,7 @@ export function PortfolioAnalytics({
                       : item.kind === "etf" ? "ETF" : "Stock"}
                   </span>
                   <div className="portfolio-line__identity">
-                    <strong>{item.ticker}</strong>
+                    <strong className="security-ticker-with-premium"><span>{item.ticker}</span><AdrPremiumBadge security={item} /></strong>
                     <span>{item.name}</span>
                   </div>
                   <div className="portfolio-line__valuation">
@@ -1509,7 +1513,7 @@ export function PortfolioAnalytics({
                   <div className={`synthetic-ranking__row ${position.weight < 0 ? "is-negative" : ""}`} key={position.id}>
                     <span className="synthetic-rank">{compositionRows.findIndex((candidate) => candidate.id === position.id) + 1}</span>
                     <div className="synthetic-security">
-                      <strong>{position.ticker}</strong>
+                      <strong className="security-ticker-with-premium"><span>{position.ticker}</span><AdrPremiumBadge security={position} /></strong>
                       <span title={position.name}>{position.name}</span>
                       <i aria-hidden="true"><b className={position.weight < 0 ? "is-negative" : ""} style={{ width: `${maxPositionWeight > 0 ? Math.abs(position.weight) / maxPositionWeight * 100 : 0}%` }} /></i>
                     </div>

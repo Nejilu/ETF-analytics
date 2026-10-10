@@ -46,6 +46,16 @@ function holding(
   };
 }
 
+test("comparisons and implicit weights retain the actual ADR component of a merged issuer", () => {
+  const adr = { ...holding("US8740391003", "TSM", 80), name: "Taiwan Semiconductor ADR" };
+  const local = { ...holding("TW0002330008", "2330", 20), name: "Taiwan Semiconductor Manufacturing" };
+  const result = compareHoldings(snapshot("LEFT", [adr, holding("other", "OTHER", 20)]), snapshot("RIGHT", [local, holding("other", "OTHER", 80)]));
+  assert.equal(result.positions.find((position) => position.ticker === "TSM / 2330")?.adrPremiumPairId, "tsmc");
+  assert.equal(result.implicitSleeves.left.positions[0].adrPremiumPairId, "tsmc");
+  const localOnly = compareHoldings(snapshot("LEFT", [local]), snapshot("RIGHT", [local]));
+  assert.equal(localOnly.positions[0].adrPremiumPairId, undefined);
+});
+
 test("calculates overlap before rounding individual positions", () => {
   const left = Array.from({ length: 300 }, (_, index) =>
     holding(`S${index}`, `L${index}`, 1 / 3),

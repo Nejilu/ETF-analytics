@@ -27,6 +27,10 @@ test("stock requests share ETF observation caches and refresh only the selected 
     process.env.SITE_ACCESS_MODE = "local";
     closeDatabase();
     ensureLocalDatabase();
+    const skhy = findSecuritiesByIds(["US78392B2060"]).get("US78392B2060");
+    assert.equal(skhy?.ticker, "SKHY");
+    assert.equal(skhy?.exchange, "NASDAQ");
+    assert.equal(skhy?.adrPremiumPairId, "sk-hynix");
     ensureMetricDefinitions();
     const securityId = "US55087P1049"; // Supported stock: LYFT.
     const capturedAt = new Date().toISOString();
@@ -50,6 +54,7 @@ test("stock requests share ETF observation caches and refresh only the selected 
     const stock = await getStockMetrics(securityId);
     assert.equal(calls, 0);
     assert.equal(stock.sourceStatus, "cached");
+    assert.equal(stock.adrPremium, null);
     assert.equal(stock.upcomingEarnings.reportDate, futureDate);
     assert.equal(stock.upcomingEarnings.sourceStatus, "cached");
     assert.equal(stock.observations.values.pe_estimate_window_4, 12.5);

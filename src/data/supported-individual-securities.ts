@@ -12,6 +12,21 @@ export interface SupportedIndividualSecurity
  */
 export const SUPPORTED_INDIVIDUAL_SECURITIES: readonly SupportedIndividualSecurity[] = [
   {
+    // Citi sponsored Nasdaq ADR, distinct from the HY9H GDR.
+    // https://depositaryreceipts.citi.com/adr/guides/pgm_d.aspx?cusip=78392B206&pageId=15&subpageid=105
+    securityId: "US78392B2060",
+    isin: "US78392B2060",
+    ticker: "SKHY",
+    name: "SK HYNIX INC SPONSORED ADR",
+    sector: "Information Technology",
+    assetClass: "Equity",
+    country: "Korea (South)",
+    currency: "USD",
+    exchange: "NASDAQ",
+    cusip: "78392B206",
+    adrPremiumPairId: "sk-hynix",
+  },
+  {
     securityId: "US55087P1049",
     isin: "US55087P1049",
     ticker: "LYFT",

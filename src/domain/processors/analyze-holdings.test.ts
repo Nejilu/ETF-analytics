@@ -55,6 +55,18 @@ function holding(
   };
 }
 
+test("holdings weights keep ADR presence after merging with a larger local-share line", () => {
+  const local = { ...holding("TW0002330008", "2330", 80), name: "Taiwan Semiconductor Manufacturing" };
+  const adr = { ...holding("US8740391003", "TSM", 20), name: "Taiwan Semiconductor ADR" };
+  const mixed = snapshot("target", "TARGET", [local, adr]);
+  const result = analyzeHoldings(mixed, mixed);
+  assert.equal(result.positions[0].publishedWeight, 100);
+  assert.equal(result.positions[0].quoteTicker, "2330");
+  assert.equal(result.positions[0].adrPremiumPairId, "tsmc");
+  assert.equal(selectHoldingsEventPositions(result.positions)[0].adrPremiumPairId, "tsmc");
+  assert.equal(analyzeHoldings(snapshot("local", "LOCAL", [local]), mixed).positions[0].adrPremiumPairId, undefined);
+});
+
 test("grouped holdings retain the largest source listing for the earnings calendar", () => {
   const target = snapshot("target", "TARGET", [
     holding("alphabet-c", "GOOG", 30), holding("alphabet-a", "GOOGL", 45), holding("other", "OTHER", 25),

@@ -9,6 +9,9 @@ import type { StockMetricsResult } from "@/domain/stock-metrics";
 import { buildStockMetricsResult } from "./stock-metrics-model";
 import { loadUpcomingEarnings } from "@/db/repositories/upcoming-earnings-repository";
 import { upcomingEarningsView } from "@/domain/upcoming-earnings";
+import { getAdrPremium } from "./adr-premium-service";
+import { adrPairForListing } from "@/domain/adr-premium";
+import { securityQuoteAlias } from "@/domain/security-equivalence";
 import {
   retrieveSecurityMetrics,
   MetricsOverviewUnavailableError,
@@ -38,8 +41,13 @@ export function getStockMetrics(
       ?? (!options.forceRefresh ? inFlightRequests.get(`${key}::force`) : undefined);
     if (existing) return existing;
     const holding = { ...security, weight: 100 };
+    const quoteAlias = securityQuoteAlias(security);
+    const adrListing = { ...security, priceSymbol: quoteAlias?.providerSymbol };
     const requestStartedAt = Date.now();
-    const request = retrieveSecurityMetrics([holding], { ...options, includeUpcomingEarnings: true }).then((result) => {
+    const request = Promise.all([
+      retrieveSecurityMetrics([holding], { ...options, includeUpcomingEarnings: true }),
+      adrPairForListing(adrListing) ? getAdrPremium(adrListing, options.forceRefresh) : Promise.resolve(null),
+    ]).then(([result, adrPremium]) => {
       const { metricsBySecurity, resolvedSecurityIds, ...metadata } = result;
       const observations = metricsBySecurity.get(securityId);
       const providerSymbol = observations?.providerSymbol
@@ -47,6 +55,7 @@ export function getStockMetrics(
           ? resolvedProviderSymbol(loadProviderSymbols([securityId]).get(securityId)) : "");
       return {
         ...buildStockMetricsResult(holding, observations, metadata, providerSymbol),
+        adrPremium,
         upcomingEarnings: upcomingEarningsView(loadUpcomingEarnings([securityId]).get(securityId),
           providerSymbol, metadata.cacheTtlHours * 3_600, requestStartedAt,
           metadata.sourceWarnings.includes("screener-unavailable")),

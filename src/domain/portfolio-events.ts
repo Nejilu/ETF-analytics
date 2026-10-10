@@ -6,6 +6,7 @@ export const PORTFOLIO_EVENT_POSITIONS_LIMIT = 10;
 export const PORTFOLIO_EVENT_POSITIONS_MAX = 30;
 
 export interface PortfolioEventPosition {
+  adrPremiumPairId?: import("./adr-premium").AdrPairId;
   securityId: string;
   ticker: string;
   name: string;
@@ -25,6 +26,7 @@ export function selectPortfolioEventPositions(portfolio: PortfolioRecord, limit 
         ticker: position.quoteTicker ?? position.ticker,
         name: position.name,
         weight: position.weight,
+        ...(position.adrPremiumPairId ? { adrPremiumPairId: position.adrPremiumPairId } : {}),
       }))
     : portfolio.items.filter((item) => item.kind === "security").map((item) => ({
         securityId: item.referenceId, ticker: item.ticker, name: item.name, weight: item.allocationWeight,
@@ -33,7 +35,7 @@ export function selectPortfolioEventPositions(portfolio: PortfolioRecord, limit 
 }
 
 export function selectHoldingsEventPositions(
-  holdings: readonly Pick<HoldingsAnalysisPosition, "securityId" | "quoteSecurityId" | "quoteTicker" | "ticker" | "name" | "assetClass" | "isCash" | "publishedWeight">[],
+  holdings: readonly Pick<HoldingsAnalysisPosition, "securityId" | "quoteSecurityId" | "quoteTicker" | "ticker" | "name" | "assetClass" | "isCash" | "publishedWeight" | "adrPremiumPairId">[],
   limit = PORTFOLIO_EVENT_POSITIONS_LIMIT,
 ): PortfolioEventPosition[] {
   return selectEventPositions(holdings
@@ -41,6 +43,7 @@ export function selectHoldingsEventPositions(
     .map((position) => ({
       securityId: position.quoteSecurityId ?? position.securityId,
       ticker: position.quoteTicker ?? position.ticker, name: position.name, weight: position.publishedWeight,
+      ...(position.adrPremiumPairId ? { adrPremiumPairId: position.adrPremiumPairId } : {}),
     })), limit);
 }
 

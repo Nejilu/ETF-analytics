@@ -4,6 +4,8 @@ export interface PublishedPortfolio {
   updatedAt: string;
   totalMarketValueUsd: number | null;
   items: Array<{
+    kind?: "etf" | "security";
+    adrPremiumPairId?: import("./adr-premium").AdrPairId | null;
     ticker: string;
     name: string;
     quantity: number | null;

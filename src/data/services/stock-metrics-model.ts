@@ -29,6 +29,7 @@ export function buildStockMetricsResult(
     security,
     observations: values,
     upcomingEarnings: { reportDate: null, exchangeTimezone: null, capturedAt: null, sourceStatus: "unavailable" },
+    adrPremium: null,
     consensusWindows: {
       "4q": series ? deriveConsensusWindow(series, 4) : null,
       "2q": series ? deriveConsensusWindow(series, 2) : null,

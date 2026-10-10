@@ -1,4 +1,5 @@
 "use client";
+import { AdrPremiumBadge } from "./adr-premium-badge";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HoldingsSnapshot } from "@/domain/etf";
@@ -204,7 +205,7 @@ export function EtfCreatorSubsets({ seed, onNewSingle, ...props }: EtfCreatorPro
       {final.emptySubsetNames.length ? <p className="alert alert--error" role="alert">These allocated subsets need at least one positive security weight: {final.emptySubsetNames.join(", ")}.</p> : null}
       {loadError || error ? <p className="alert alert--error" role="alert">{error ?? loadError}</p> : null}
       <label className="field"><span>Search final constituents</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-      <div className="creator-final-table"><table><thead><tr><th>Security</th><th>Subset contributions</th><th>Final ETF weight</th></tr></thead><tbody>{visible.slice(0, 250).map((holding) => <tr key={holding.securityId}><td><strong>{holding.ticker}</strong><small>{holding.name}</small></td><td>{contributionIndex.get(holding.securityId)?.map((part) => `${part.name}: ${formatWeight(part.weight)}`).join(" · ")}</td><td>{formatWeight(holding.weight)}</td></tr>)}</tbody></table></div>
+      <div className="creator-final-table"><table><thead><tr><th>Security</th><th>Subset contributions</th><th>Final ETF weight</th></tr></thead><tbody>{visible.slice(0, 250).map((holding) => <tr key={holding.securityId}><td><strong className="security-ticker-with-premium"><span>{holding.ticker}</span><AdrPremiumBadge security={holding} /></strong><small>{holding.name}</small></td><td>{contributionIndex.get(holding.securityId)?.map((part) => `${part.name}: ${formatWeight(part.weight)}`).join(" · ")}</td><td>{formatWeight(holding.weight)}</td></tr>)}</tbody></table></div>
       {visible.length > 250 ? <p className="creator-table-note">Showing the first 250 securities. Use search for another constituent.</p> : null}
     </section>
     <section className="panel creator-save-panel">

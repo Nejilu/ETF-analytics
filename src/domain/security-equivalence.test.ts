@@ -26,6 +26,9 @@ function holding(
 }
 
 test("maps Asian primary listings to explicit Yahoo depositary symbols", () => {
+  assert.deepEqual(securityQuoteAlias({ ticker: "SKHY", name: "SK HYNIX INC SPONSORED ADR" }), {
+    displayTicker: "SKHY", providerSymbol: "SKHY", instrumentType: "ADR", underlyingTicker: "000660",
+  });
   assert.deepEqual(
     securityQuoteAlias({
       ticker: "2330",
@@ -219,6 +222,7 @@ test("merges depositary receipts and share classes into economic positions", () 
   ]);
 
   assert.equal(merged.length, 3);
+  assert.equal(merged.find((position) => position.securityId === "economic:taiwan-semiconductor")?.adrPremiumPairId, "tsmc");
   assert.deepEqual(
     merged.map(({ ticker, weight }) => [ticker, weight]),
     [

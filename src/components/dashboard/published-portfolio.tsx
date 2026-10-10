@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { PublishedPortfolio } from "@/domain/published-portfolio";
+import { AdrPremiumBadge } from "./adr-premium-badge";
 
 export function PublishedPortfolioPanel({ etfId }: { etfId: string }) {
   const [data, setData] = useState<PublishedPortfolio | null>(null);
@@ -68,7 +69,7 @@ export function PublishedPortfolioPanel({ etfId }: { etfId: string }) {
                 {data.items.map((item, index) => (
                   <tr key={`${item.ticker}-${index}`}>
                     <td>
-                      {item.ticker} · {item.name}
+                      <strong className="security-ticker-with-premium"><span>{item.ticker}</span><AdrPremiumBadge security={item} /></strong> · {item.name}
                     </td>
                     <td>{number(item.quantity)}</td>
                     <td>{number(item.currentValueUsd)}</td>
